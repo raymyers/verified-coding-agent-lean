@@ -9,6 +9,51 @@ import Myproject.ReActExecutable
 
 open ReAct
 
+/-! ## Environment File Loading -/
+
+/-- Parse a single line from .env file. Returns (key, value) if valid. -/
+def parseEnvLine (line : String) : Option (String × String) :=
+  let line := line.trim
+  if line.isEmpty || line.startsWith "#" then
+    none
+  else
+    match line.splitOn "=" with
+    | [key, value] =>
+        let key := key.trim
+        let value := value.trim
+        -- Remove surrounding quotes if present
+        let value := if value.startsWith "\"" && value.endsWith "\"" then
+          value.drop 1 |>.dropRight 1
+        else value
+        some (key, value)
+    | _ => none
+
+/-- Load environment variables from .env file. -/
+def loadEnvFile (path : String := ".env") : IO (List (String × String)) := do
+  let result ← IO.FS.readFile path |>.toBaseIO
+  match result with
+  | .ok content =>
+      let lines := content.splitOn "\n"
+      return lines.filterMap parseEnvLine
+  | .error _ =>
+      return []
+
+/-- Environment configuration loaded from .env file. -/
+structure EnvConfig where
+  model : Option String
+  apiKey : Option String
+  baseUrl : Option String
+
+/-- Load config from .env file. -/
+def loadEnvConfig : IO EnvConfig := do
+  let vars ← loadEnvFile
+  let lookup key := vars.find? (·.1 == key) |>.map (·.2)
+  return {
+    model := lookup "LLM_MODEL"
+    apiKey := lookup "LLM_API_KEY"
+    baseUrl := lookup "LLM_BASE_URL"
+  }
+
 /-! ## HTTP Client via curl -/
 
 /-- Make an HTTP POST request using curl subprocess. -/
@@ -134,7 +179,7 @@ structure CLIConfig where
   verbose : Bool
   deriving Repr
 
-/-- Default configuration. -/
+/-- Default configuration (without env). -/
 def CLIConfig.default : CLIConfig := {
   mode := .react
   task := ""
@@ -147,6 +192,15 @@ def CLIConfig.default : CLIConfig := {
   workDir := "."
   verbose := false
 }
+
+/-- Create config with .env overrides. -/
+def CLIConfig.withEnv (env : EnvConfig) : CLIConfig :=
+  let base := CLIConfig.default
+  { base with
+    endpoint := env.baseUrl.map (· ++ "/v1/chat/completions") |>.getD base.endpoint
+    model := env.model.getD base.model
+    apiKey := env.apiKey.getD base.apiKey
+  }
 
 /-- Print usage information. -/
 def printUsage : IO Unit := do
@@ -177,9 +231,14 @@ def printUsage : IO Unit := do
 
 /-- Parse command line arguments. -/
 def parseArgs (args : List String) : IO (Option CLIConfig) := do
-  -- Get API key from environment if not provided
+  -- Load .env file first
+  let envCfg ← loadEnvConfig
+  let baseCfg := CLIConfig.withEnv envCfg
+  -- Also check LITELLM_API_KEY env var as fallback
   let envKey ← IO.getEnv "LITELLM_API_KEY"
-  let defaultKey := envKey.getD ""
+  let baseCfg := if baseCfg.apiKey.isEmpty then
+    { baseCfg with apiKey := envKey.getD "" }
+  else baseCfg
   let rec go (cfg : CLIConfig) (args : List String) : IO (Option CLIConfig) := do
     match args with
     | [] =>
@@ -224,7 +283,7 @@ def parseArgs (args : List String) : IO (Option CLIConfig) := do
           go { cfg with task := arg } rest
         else
           go { cfg with task := cfg.task ++ " " ++ arg } rest
-  go { CLIConfig.default with apiKey := defaultKey } args
+  go baseCfg args
 
 /-! ## Mode Handlers -/
 
