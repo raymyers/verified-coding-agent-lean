@@ -326,14 +326,24 @@ structure PendingToolCall where
   raw : Lean.Json
   action : Action
 
-/-- Convert trace to chat messages for LLM (using tool calling format). -/
-def traceToMessages (systemPrompt : String) (trace : List (PendingToolCall × String))
-    : List LLM.ChatMessage :=
+/-- Convert trace to chat messages for LLM (using tool calling format).
+    Always includes a user message with the task to satisfy API requirements. -/
+def traceToMessages (systemPrompt : String) (task : String)
+    (trace : List (PendingToolCall × String)) : List LLM.ChatMessage :=
   let system := LLM.ChatMessage.text "system" systemPrompt
+  let user := LLM.ChatMessage.text "user" task
   let history := trace.flatMap fun (tc, observation) =>
     [ LLM.ChatMessage.withToolCalls #[tc.raw],
       LLM.ChatMessage.toolResult tc.call.id tc.call.name observation ]
-  [system] ++ history
+  [system, user] ++ history
+
+/-- traceToMessages always produces a valid message list (contains non-system message). -/
+theorem traceToMessages_valid (systemPrompt task : String)
+    (trace : List (PendingToolCall × String)) :
+    LLM.validMessageList (traceToMessages systemPrompt task trace) := by
+  simp only [traceToMessages]
+  use LLM.ChatMessage.text "user" task
+  simp [LLM.ChatMessage.text]
 
 /-- React mode: full agent with tool calling. -/
 def runReactMode (cfg : CLIConfig) : IO UInt32 := do
@@ -360,8 +370,8 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
     stepCount := stepCount + 1
     if cfg.verbose then
       IO.println s!"[Step {stepCount}]"
-    -- Build messages and call LLM
-    let messages := traceToMessages systemPrompt history
+    -- Build messages and call LLM (proven valid by traceToMessages_valid)
+    let messages := traceToMessages systemPrompt cfg.task history
     if cfg.verbose then
       IO.println s!"  Calling LLM with {messages.length} messages..."
     let response ← LLM.call llmCfg messages agentTools

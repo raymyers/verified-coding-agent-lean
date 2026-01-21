@@ -21,6 +21,11 @@ structure ChatMessage where
   toolCallId : Option String := none
   name : Option String := none
 
+/-- A message list is valid for LLM APIs if it contains at least one message
+    whose role is not "system". Required by Anthropic. -/
+def validMessageList (messages : List ChatMessage) : Prop :=
+  ∃ m ∈ messages, m.role ≠ "system"
+
 /-- Build a user or system message. -/
 def ChatMessage.text (role content : String) : ChatMessage :=
   { role, content := some content }
@@ -32,6 +37,16 @@ def ChatMessage.withToolCalls (toolCalls : Array Json) : ChatMessage :=
 /-- Build a tool result message. -/
 def ChatMessage.toolResult (toolCallId name content : String) : ChatMessage :=
   { role := "tool", content := some content, toolCallId := some toolCallId, name := some name }
+
+/-! ## Message List Validity Theorems -/
+
+theorem validMessageList_cons_user (content : String) (rest : List ChatMessage) :
+    validMessageList (ChatMessage.text "user" content :: rest) :=
+  ⟨ChatMessage.text "user" content, .head _, by simp [ChatMessage.text]⟩
+
+theorem validMessageList_cons_assistant (tc : Array Json) (rest : List ChatMessage) :
+    validMessageList (ChatMessage.withToolCalls tc :: rest) :=
+  ⟨ChatMessage.withToolCalls tc, .head _, by simp [ChatMessage.withToolCalls]⟩
 
 instance : ToJson ChatMessage where
   toJson m :=
