@@ -6,6 +6,8 @@ Supports multiple modes for testing: prompt, chat, react.
 -/
 
 import ReActAgent.ReActExecutable
+import ReActAgent.LLM
+import ReActAgent.Tools
 
 open ReAct
 
@@ -53,101 +55,6 @@ def loadEnvConfig : IO EnvConfig := do
     apiKey := lookup "LLM_API_KEY"
     baseUrl := lookup "LLM_BASE_URL"
   }
-
-/-! ## HTTP Client via curl -/
-
-/-- Make an HTTP POST request using curl subprocess. -/
-def httpPost (url : String) (body : String) (headers : List (String × String)) : IO String := do
-  let headerArgs := headers.flatMap fun (k, v) => ["-H", s!"{k}: {v}"]
-  let args : Array String := #["-s", "-X", "POST", url, "-d", body] ++ headerArgs.toArray
-  let output ← IO.Process.output { cmd := "curl", args := args }
-  if output.exitCode != 0 then
-    throw <| IO.userError s!"curl failed (exit {output.exitCode}): {output.stderr}"
-  return output.stdout
-
-/-! ## JSON Helpers -/
-
-/-- Escape a string for JSON. -/
-def jsonEscape (s : String) : String :=
-  s.replace "\\" "\\\\"
-   |>.replace "\"" "\\\""
-   |>.replace "\n" "\\n"
-   |>.replace "\r" "\\r"
-   |>.replace "\t" "\\t"
-
-/-- Build a JSON string value. -/
-def jsonString (s : String) : String := s!"\"{jsonEscape s}\""
-
-/-- Build a JSON object from key-value pairs. -/
-def jsonObject (pairs : List (String × String)) : String :=
-  let inner := pairs.map (fun (k, v) => s!"\"{k}\": {v}") |> String.intercalate ", "
-  s!"\{{inner}}"
-
-/-- Build a JSON array. -/
-def jsonArray (items : List String) : String :=
-  s!"[{String.intercalate ", " items}]"
-
-/-! ## LiteLLM Integration -/
-
-/-- A chat message for the OpenAI API. -/
-structure ChatMessage where
-  role : String
-  content : String
-
-/-- Convert ChatMessage to JSON. -/
-def ChatMessage.toJson (m : ChatMessage) : String :=
-  jsonObject [("role", jsonString m.role), ("content", jsonString m.content)]
-
-/-- Configuration for LiteLLM. -/
-structure LiteLLMConfig where
-  endpoint : String
-  model : String
-  apiKey : String := ""
-
-/-- Call LiteLLM with a list of messages. -/
-def callLiteLLM (cfg : LiteLLMConfig) (messages : List ChatMessage) : IO String := do
-  let messagesJson := jsonArray (messages.map ChatMessage.toJson)
-  let body := jsonObject [
-    ("model", jsonString cfg.model),
-    ("messages", messagesJson)
-  ]
-  let headers := [
-    ("Content-Type", "application/json")
-  ] ++ (if cfg.apiKey.isEmpty then [] else [("Authorization", s!"Bearer {cfg.apiKey}")])
-  let response ← httpPost cfg.endpoint body headers
-  return response
-
-/-- Extract content from OpenAI-style JSON response (simple parsing). -/
-def extractContent (response : String) : IO String := do
-  -- Simple extraction: find "content": "..." pattern
-  -- This is fragile but avoids needing a full JSON parser
-  let contentKey := "\"content\":"
-  match response.splitOn contentKey with
-  | _ :: rest :: _ =>
-      let afterKey := rest.trimLeft
-      if afterKey.startsWith "\"" then
-        let inner := afterKey.drop 1
-        -- Find closing quote (not escaped)
-        let mut result := ""
-        let mut escaped := false
-        for c in inner.toList do
-          if escaped then
-            match c with
-            | 'n' => result := result.push '\n'
-            | 'r' => result := result.push '\r'
-            | 't' => result := result.push '\t'
-            | _ => result := result.push c
-            escaped := false
-          else if c == '\\' then
-            escaped := true
-          else if c == '"' then
-            return result
-          else
-            result := result.push c
-        return result
-      else
-        throw <| IO.userError s!"Expected string after content key, got: {afterKey.take 50}"
-  | _ => throw <| IO.userError s!"Could not find content in response: {response.take 200}"
 
 /-! ## CLI Configuration -/
 
@@ -295,19 +202,19 @@ def runPromptMode (cfg : CLIConfig) : IO UInt32 := do
     IO.println s!"Model: {cfg.model}"
     IO.println s!"Prompt: {cfg.task}"
     IO.println ""
-  let llmCfg : LiteLLMConfig := {
+  let llmCfg : LLM.Config := {
     endpoint := cfg.endpoint
     model := cfg.model
     apiKey := cfg.apiKey
   }
-  let messages := [{ role := "user", content := cfg.task : ChatMessage }]
+  let messages := [{ role := "user", content := cfg.task : LLM.ChatMessage }]
   if cfg.verbose then
     IO.println "Calling LLM..."
-  let response ← callLiteLLM llmCfg messages
+  let response ← LLM.call llmCfg messages
   if cfg.verbose then
     IO.println s!"Raw response: {response}"
     IO.println ""
-  let content ← extractContent response
+  let content ← LLM.extractContent response
   IO.println content
   return 0
 
@@ -318,20 +225,20 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
     IO.println s!"Endpoint: {cfg.endpoint}"
     IO.println s!"Model: {cfg.model}"
     IO.println ""
-  let llmCfg : LiteLLMConfig := {
+  let llmCfg : LLM.Config := {
     endpoint := cfg.endpoint
     model := cfg.model
     apiKey := cfg.apiKey
   }
   let systemPrompt := "You are a helpful assistant."
-  let mut messages : List ChatMessage := [
+  let mut messages : List LLM.ChatMessage := [
     { role := "system", content := systemPrompt },
     { role := "user", content := cfg.task }
   ]
   IO.println s!"You: {cfg.task}"
   -- First response
-  let response ← callLiteLLM llmCfg messages
-  let content ← extractContent response
+  let response ← LLM.call llmCfg messages
+  let content ← LLM.extractContent response
   IO.println s!"Assistant: {content}"
   messages := messages ++ [{ role := "assistant", content := content }]
   -- Chat loop
@@ -343,8 +250,8 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
     if input.isEmpty || input == "quit" || input == "exit" then
       break
     messages := messages ++ [{ role := "user", content := input }]
-    let response ← callLiteLLM llmCfg messages
-    let content ← extractContent response
+    let response ← LLM.call llmCfg messages
+    let content ← LLM.extractContent response
     IO.println s!"Assistant: {content}"
     messages := messages ++ [{ role := "assistant", content := content }]
   return 0
@@ -406,19 +313,19 @@ where
     | _ => none
 
 /-- Convert trace to chat messages for LLM. -/
-def traceToMessages (systemPrompt : String) (trace : Trace) : List ChatMessage :=
-  let system : ChatMessage := { role := "system", content := systemPrompt }
+def traceToMessages (systemPrompt : String) (trace : Trace) : List LLM.ChatMessage :=
+  let system : LLM.ChatMessage := { role := "system", content := systemPrompt }
   let history := trace.flatMap fun step =>
-    let assistantMsg : ChatMessage := {
+    let assistantMsg : LLM.ChatMessage := {
       role := "assistant"
       content := s!"Thought: {step.thought}\nAction: {formatAction step.action}"
     }
-    let userMsg : ChatMessage := {
+    let userMsg : LLM.ChatMessage := {
       role := "user"
       content := s!"Observation: {step.observation}"
     }
     [assistantMsg, userMsg]
-  let continueMsg : ChatMessage := {
+  let continueMsg : LLM.ChatMessage := {
     role := "user"
     content := if trace.isEmpty then
       "Begin working on the task. Start with your first thought and action."
@@ -431,36 +338,6 @@ where
     | .toolCall name args => s!"{name} {args}"
     | .submit output => s!"submit {output}"
     | .requestInput prompt => s!"request_input {prompt}"
-
-/-- Execute a tool and return observation. -/
-def executeTool (workDir : String) (name : String) (args : String) : IO String := do
-  match name with
-  | "bash" =>
-      let output ← IO.Process.output {
-        cmd := "bash"
-        args := #["-c", args]
-        cwd := some workDir
-      }
-      if output.exitCode == 0 then
-        return output.stdout
-      else
-        return s!"Error (exit {output.exitCode}): {output.stderr}\n{output.stdout}"
-  | "read_file" =>
-      let result ← IO.FS.readFile args |>.toBaseIO
-      match result with
-      | .ok content => return content
-      | .error e => return s!"Error reading file: {e}"
-  | "write_file" =>
-      -- Parse "path content" from args
-      match args.splitOn " " with
-      | path :: rest =>
-          let content := " ".intercalate rest
-          let result ← (IO.FS.writeFile path content) |>.toBaseIO
-          match result with
-          | .ok _ => return s!"Successfully wrote to {path}"
-          | .error e => return s!"Error writing file: {e}"
-      | _ => return "Error: write_file requires <path> <content>"
-  | _ => return s!"Unknown tool: {name}"
 
 /-- React mode: full agent with tools. -/
 def runReactMode (cfg : CLIConfig) : IO UInt32 := do
@@ -487,7 +364,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
   if cfg.verbose then
     IO.println s!"Starting agent..."
   -- Real agent loop with LLM calls
-  let llmCfg : LiteLLMConfig := {
+  let llmCfg : LLM.Config := {
     endpoint := cfg.endpoint
     model := cfg.model
     apiKey := cfg.apiKey
@@ -506,8 +383,8 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
         let messages := traceToMessages systemPrompt state.trace
         if cfg.verbose then
           IO.println s!"  Calling LLM with {messages.length} messages..."
-        let response ← callLiteLLM llmCfg messages
-        let content ← extractContent response
+        let response ← LLM.call llmCfg messages
+        let content ← LLM.extractContent response
         if cfg.verbose then
           IO.println s!"  LLM response: {content.take 200}..."
         -- Parse thought/action
@@ -527,7 +404,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
         match action with
         | .toolCall name args =>
             IO.println s!"Executing: {name} {args}"
-            let obs ← executeTool cfg.workDir name args
+            let obs ← Tools.execute cfg.workDir name args
             IO.println s!"Observation: {obs.take 500}"
             let step : Step := ⟨thought, action, obs⟩
             state := { state with
