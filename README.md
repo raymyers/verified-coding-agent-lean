@@ -1,4 +1,18 @@
-# myproject
+# ReActAgent - Verified Coding Agent in Lean 4
+
+A formalized ReAct (Reasoning + Acting) agent implementation in Lean 4, with mathematical proofs of agent properties.
+
+## Project Structure
+
+- `ReActAgent/` - Core library
+  - `Basic.lean` - Basic definitions
+  - `ReAct.lean` - Formalized ReAct agent state machine and proofs
+  - `ReActExecutable.lean` - Executable agent implementation
+- `Main.lean` - CLI entry point for the react-agent executable
+
+## Related
+
+[numina-lean-agent](https://github.com/project-numina/numina-lean-agent)
 
 ## GitHub configuration
 

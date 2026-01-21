@@ -11,7 +11,7 @@ the environment could return anything. To execute, we:
 4. Wire the oracles to IO for actual execution
 -/
 
-import Myproject.ReAct
+import ReActAgent.ReAct
 
 namespace ReAct
 

@@ -5,7 +5,7 @@ Command-line interface for running the verified ReAct agent.
 Supports multiple modes for testing: prompt, chat, react.
 -/
 
-import Myproject.ReActExecutable
+import ReActAgent.ReActExecutable
 
 open ReAct
 
