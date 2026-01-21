@@ -80,6 +80,8 @@ The core agent logic in `ReAct.lean` defines a state machine with:
 
 This was implemented with help from [numina-lean-agent](https://github.com/project-numina/numina-lean-agent) and Claude Opus 4.5.
 
+[mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent) is a great starting point as a "minimum viable agent".
+
 ## GitHub configuration
 
 To set up your new GitHub repository, follow these steps:
