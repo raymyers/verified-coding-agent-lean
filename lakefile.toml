@@ -1,7 +1,7 @@
 name = "react-agent"
 version = "0.1.0"
 keywords = ["math"]
-defaultTargets = ["ReActAgent"]
+defaultTargets = ["react-agent"]
 
 [leanOptions]
 pp.unicode.fun = true # pretty-prints `fun a ↦ b`
