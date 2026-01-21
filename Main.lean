@@ -121,9 +121,9 @@ def printUsage : IO Unit := do
   IO.println ""
   IO.println "OPTIONS:"
   IO.println "  --mode <MODE>          Mode: prompt, chat, react (default: react)"
-  IO.println "  -e, --endpoint <URL>   LiteLLM endpoint (default: http://localhost:8000/v1/chat/completions)"
+  IO.println "  -e, --endpoint <URL>   LLM API endpoint (default: http://localhost:8000/v1/chat/completions)"
   IO.println "  -m, --model <NAME>     Model name (default: claude-sonnet-4-20250514)"
-  IO.println "  -k, --api-key <KEY>    API key (or set LITELLM_API_KEY env var)"
+  IO.println "  -k, --api-key <KEY>    API key (or set LLM_API_KEY env var)"
   IO.println "  --max-turns <N>        Maximum turns/think+act cycles (default: 20)"
   IO.println "  --max-cost <N>         Maximum token cost (default: 10000)"
   IO.println "  -i, --interactive      Enable interactive mode (non-headless)"
@@ -141,8 +141,8 @@ def parseArgs (args : List String) : IO (Option CLIConfig) := do
   -- Load .env file first
   let envCfg ← loadEnvConfig
   let baseCfg := CLIConfig.withEnv envCfg
-  -- Also check LITELLM_API_KEY env var as fallback
-  let envKey ← IO.getEnv "LITELLM_API_KEY"
+  -- Also check LLM_API_KEY env var as fallback
+  let envKey ← IO.getEnv "LLM_API_KEY"
   let baseCfg := if baseCfg.apiKey.isEmpty then
     { baseCfg with apiKey := envKey.getD "" }
   else baseCfg
@@ -373,7 +373,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
   -- Run the agent loop manually (can't use runIO without proper IOOracles setup)
   let mut state := initialState
   let mut iteration := 0
-  while !state.isTerminal && iteration < cfg.maxSteps do
+  while !state.isTerminal && iteration < cfg.maxTurns do
     iteration := iteration + 1
     if cfg.verbose then
       IO.println s!"[Step {iteration}] Phase: {repr state.phase}"
@@ -431,7 +431,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
         }
     | .done _ => break
   -- Check if we hit step limit
-  if iteration ≥ cfg.maxSteps && !state.isTerminal then
+  if iteration ≥ cfg.maxTurns && !state.isTerminal then
     state := { state with phase := .done .stepLimitReached }
   let finalState := state
   IO.println s!"\nAgent completed."

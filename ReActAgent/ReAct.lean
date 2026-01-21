@@ -272,26 +272,4 @@ theorem headless_never_needs_input_star (s s' : State) (h : s ⟶* s')
       have hNotNeedsInput := headless_never_needs_input _ _ hstep hHeadless
       exact ih hHeadless' hNotNeedsInput
 
-/-! ## Coding Agent Specialization
-
-A coding agent is a ReAct agent where:
-1. Tools are software-development relevant (read, write, execute, etc.)
-2. The task involves modifying code to meet a specification
--/
-
-/-- Tools relevant to software development. -/
-inductive CodingTool where
-  | readFile (path : String)
-  | writeFile (path : String) (content : String)
-  | execute (cmd : String)
-  | search (query : String)
-  deriving Repr, DecidableEq
-
-/-- A coding agent configuration. -/
-structure CodingConfig extends Config where
-  /-- The task specification (what success looks like). -/
-  taskDescription : String
-  /-- Paths the agent is allowed to modify. -/
-  allowedPaths : List String
-
 end ReAct
