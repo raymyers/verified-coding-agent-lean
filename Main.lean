@@ -339,7 +339,55 @@ where
     | .submit output => s!"submit {output}"
     | .requestInput prompt => s!"request_input {prompt}"
 
-/-- React mode: full agent with tools. -/
+/-- Create IO oracles from CLI configuration.
+    The LLM oracle captures the system prompt and config in a closure. -/
+def mkIOOracles (cfg : CLIConfig) (systemPrompt : String) (verbose : Bool) : IOOracles :=
+  let llmCfg : LLM.Config := {
+    endpoint := cfg.endpoint
+    model := cfg.model
+    apiKey := cfg.apiKey
+  }
+  { llm := fun trace => do
+      let messages := traceToMessages systemPrompt trace
+      if verbose then
+        IO.println s!"  Calling LLM with {messages.length} messages..."
+      let response ← LLM.call llmCfg messages
+      let content ← LLM.extractContent response
+      if verbose then
+        IO.println s!"  LLM response: {content.take 200}..."
+      match parseThoughtAction content with
+      | some (thought, action) => return { thought, action, cost := 1 }
+      | none => throw <| IO.userError s!"Failed to parse LLM response:\n{content}"
+    env := fun name args => Tools.execute cfg.workDir name args
+    user := fun prompt => do
+      IO.println s!"Agent requests input: {prompt}"
+      IO.print "> "
+      let line ← (← IO.getStdin).getLine
+      return line.trim
+  }
+
+/-- Log the current phase for verbose output. -/
+def logPhase (state : State) (verbose : Bool) : IO Unit := do
+  if verbose then
+    IO.println s!"[Step {state.stepCount + 1}] Phase: {repr state.phase}"
+  match state.phase with
+  | .acting thought action =>
+      IO.println s!"Thought: {thought}"
+      let actionStr := match action with
+        | .toolCall name args => s!"{name} {args}"
+        | .submit output => s!"submit {output}"
+        | .requestInput p => s!"request_input {p}"
+      IO.println s!"Action: {actionStr}"
+  | _ => pure ()
+
+/-- Log observation after tool execution. -/
+def logObservation (oldState newState : State) : IO Unit := do
+  -- If we just executed a tool, log the observation
+  if newState.trace.length > oldState.trace.length then
+    if let some step := newState.trace.getLast? then
+      IO.println s!"Observation: {step.observation.take 500}"
+
+/-- React mode: full agent with tools using verified stepIO. -/
 def runReactMode (cfg : CLIConfig) : IO UInt32 := do
   if cfg.verbose then
     IO.println s!"Mode: react (full agent)"
@@ -363,76 +411,23 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
   }
   if cfg.verbose then
     IO.println s!"Starting agent..."
-  -- Real agent loop with LLM calls
-  let llmCfg : LLM.Config := {
-    endpoint := cfg.endpoint
-    model := cfg.model
-    apiKey := cfg.apiKey
-  }
   let systemPrompt := reactSystemPrompt cfg.task
-  -- Run the agent loop manually (can't use runIO without proper IOOracles setup)
+  let oracles := mkIOOracles cfg systemPrompt cfg.verbose
+  -- Run using verified stepIO
   let mut state := initialState
-  let mut iteration := 0
-  while !state.isTerminal && iteration < cfg.maxTurns do
-    iteration := iteration + 1
-    if cfg.verbose then
-      IO.println s!"[Step {iteration}] Phase: {repr state.phase}"
-    match state.phase with
-    | .thinking =>
-        -- Call LLM
-        let messages := traceToMessages systemPrompt state.trace
-        if cfg.verbose then
-          IO.println s!"  Calling LLM with {messages.length} messages..."
-        let response ← LLM.call llmCfg messages
-        let content ← LLM.extractContent response
-        if cfg.verbose then
-          IO.println s!"  LLM response: {content.take 200}..."
-        -- Parse thought/action
-        match parseThoughtAction content with
-        | some (thought, action) =>
-            IO.println s!"Thought: {thought}"
-            let actionStr := match action with
-              | .toolCall name args => s!"{name} {args}"
-              | .submit output => s!"submit {output}"
-              | .requestInput p => s!"request_input {p}"
-            IO.println s!"Action: {actionStr}"
-            state := { state with phase := .acting thought action, cost := state.cost + 1 }
-        | none =>
-            IO.println s!"Error: Could not parse response:\n{content}"
-            state := { state with phase := .done (.error "Failed to parse LLM response") }
-    | .acting thought action =>
-        match action with
-        | .toolCall name args =>
-            IO.println s!"Executing: {name} {args}"
-            let obs ← Tools.execute cfg.workDir name args
-            IO.println s!"Observation: {obs.take 500}"
-            let step : Step := ⟨thought, action, obs⟩
-            state := { state with
-              phase := .thinking
-              trace := state.trace ++ [step]
-              stepCount := state.stepCount + 1
-            }
-        | .submit output =>
-            IO.println s!"Submitting: {output}"
-            state := { state with phase := .done (.submitted output) }
-        | .requestInput prompt =>
-            if cfg.headless then
-              state := { state with phase := .done (.error "Headless agent cannot request input") }
-            else
-              state := { state with phase := .needsInput prompt }
-    | .needsInput prompt =>
-        IO.println s!"Agent requests input: {prompt}"
-        IO.print "> "
-        let input ← (← IO.getStdin).getLine
-        let step : Step := ⟨"Received user input", .requestInput prompt, input.trim⟩
-        state := { state with
-          phase := .thinking
-          trace := state.trace ++ [step]
-        }
-    | .done _ => break
-  -- Check if we hit step limit
-  if iteration ≥ cfg.maxTurns && !state.isTerminal then
-    state := { state with phase := .done .stepLimitReached }
+  while !state.isTerminal do
+    logPhase state cfg.verbose
+    let stepResult ← stepIO oracles state |>.toBaseIO
+    match stepResult with
+    | .ok (some newState) =>
+        logObservation state newState
+        state := newState
+    | .ok none =>
+        -- Blocked (headless requesting input)
+        state := { state with phase := .done (.error "Agent blocked") }
+    | .error e =>
+        IO.println s!"Error: {e}"
+        state := { state with phase := .done (.error s!"{e}") }
   let finalState := state
   IO.println s!"\nAgent completed."
   IO.println s!"  Final phase: {repr finalState.phase}"
