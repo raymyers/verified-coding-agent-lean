@@ -172,7 +172,7 @@ structure CLIConfig where
   endpoint : String
   model : String
   apiKey : String
-  maxSteps : Nat
+  maxTurns : Nat   -- A turn = one think+act cycle
   maxCost : Nat
   headless : Bool
   workDir : String
@@ -186,7 +186,7 @@ def CLIConfig.default : CLIConfig := {
   endpoint := "http://localhost:8000/v1/chat/completions"
   model := "claude-sonnet-4-20250514"
   apiKey := ""
-  maxSteps := 20
+  maxTurns := 20
   maxCost := 10000
   headless := true
   workDir := "."
@@ -217,7 +217,7 @@ def printUsage : IO Unit := do
   IO.println "  -e, --endpoint <URL>   LiteLLM endpoint (default: http://localhost:8000/v1/chat/completions)"
   IO.println "  -m, --model <NAME>     Model name (default: claude-sonnet-4-20250514)"
   IO.println "  -k, --api-key <KEY>    API key (or set LITELLM_API_KEY env var)"
-  IO.println "  --max-steps <N>        Maximum steps (default: 20)"
+  IO.println "  --max-turns <N>        Maximum turns/think+act cycles (default: 20)"
   IO.println "  --max-cost <N>         Maximum token cost (default: 10000)"
   IO.println "  -i, --interactive      Enable interactive mode (non-headless)"
   IO.println "  -w, --workdir <DIR>    Working directory (default: .)"
@@ -260,10 +260,10 @@ def parseArgs (args : List String) : IO (Option CLIConfig) := do
     | "--model" :: model :: rest => go { cfg with model := model } rest
     | "-k" :: key :: rest => go { cfg with apiKey := key } rest
     | "--api-key" :: key :: rest => go { cfg with apiKey := key } rest
-    | "--max-steps" :: n :: rest =>
+    | "--max-turns" :: n :: rest =>
         match n.toNat? with
-        | some num => go { cfg with maxSteps := num } rest
-        | none => IO.println s!"Error: Invalid number for --max-steps: {n}"; return none
+        | some num => go { cfg with maxTurns := num } rest
+        | none => IO.println s!"Error: Invalid number for --max-turns: {n}"; return none
     | "--max-cost" :: n :: rest =>
         match n.toNat? with
         | some num => go { cfg with maxCost := num } rest
@@ -349,6 +349,119 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
     messages := messages ++ [{ role := "assistant", content := content }]
   return 0
 
+/-! ## ReAct Agent Implementation -/
+
+/-- System prompt for ReAct agent. -/
+def reactSystemPrompt (task : String) : String :=
+  s!"You are a coding agent that solves tasks step by step.
+
+TASK: {task}
+
+You must respond in this exact format:
+
+Thought: <your reasoning about what to do next>
+Action: <action_name> <arguments>
+
+Available actions:
+- bash <command>: Execute a shell command
+- read_file <path>: Read a file's contents
+- write_file <path> <content>: Write content to a file
+- submit <result>: Submit your final answer and complete the task
+
+Rules:
+1. Always start with a Thought explaining your reasoning
+2. Then provide exactly ONE Action
+3. Wait for the observation before your next step
+4. Use 'submit' when the task is complete
+
+Example:
+Thought: I need to see what files are in the current directory.
+Action: bash ls -la"
+
+/-- Parse thought and action from LLM response. -/
+def parseThoughtAction (response : String) : Option (String × Action) := do
+  -- Find Thought:
+  let thoughtStart := response.splitOn "Thought:"
+  guard (thoughtStart.length > 1)
+  let afterThought := thoughtStart[1]!
+  -- Find Action:
+  let actionSplit := afterThought.splitOn "Action:"
+  guard (actionSplit.length > 1)
+  let thought := actionSplit[0]!.trim
+  let actionLine := actionSplit[1]!.trim.splitOn "\n" |>.head!.trim
+  -- Parse action
+  let action ← parseActionLine actionLine
+  return (thought, action)
+where
+  parseActionLine (line : String) : Option Action := do
+    let parts := line.splitOn " "
+    guard (parts.length ≥ 1)
+    let cmd := parts[0]!
+    let args := " ".intercalate (parts.drop 1)
+    match cmd with
+    | "bash" => some (.toolCall "bash" args)
+    | "read_file" => some (.toolCall "read_file" args)
+    | "write_file" => some (.toolCall "write_file" args)
+    | "submit" => some (.submit args)
+    | _ => none
+
+/-- Convert trace to chat messages for LLM. -/
+def traceToMessages (systemPrompt : String) (trace : Trace) : List ChatMessage :=
+  let system : ChatMessage := { role := "system", content := systemPrompt }
+  let history := trace.flatMap fun step =>
+    let assistantMsg : ChatMessage := {
+      role := "assistant"
+      content := s!"Thought: {step.thought}\nAction: {formatAction step.action}"
+    }
+    let userMsg : ChatMessage := {
+      role := "user"
+      content := s!"Observation: {step.observation}"
+    }
+    [assistantMsg, userMsg]
+  let continueMsg : ChatMessage := {
+    role := "user"
+    content := if trace.isEmpty then
+      "Begin working on the task. Start with your first thought and action."
+    else
+      "Continue with your next thought and action."
+  }
+  [system] ++ history ++ [continueMsg]
+where
+  formatAction : Action → String
+    | .toolCall name args => s!"{name} {args}"
+    | .submit output => s!"submit {output}"
+    | .requestInput prompt => s!"request_input {prompt}"
+
+/-- Execute a tool and return observation. -/
+def executeTool (workDir : String) (name : String) (args : String) : IO String := do
+  match name with
+  | "bash" =>
+      let output ← IO.Process.output {
+        cmd := "bash"
+        args := #["-c", args]
+        cwd := some workDir
+      }
+      if output.exitCode == 0 then
+        return output.stdout
+      else
+        return s!"Error (exit {output.exitCode}): {output.stderr}\n{output.stdout}"
+  | "read_file" =>
+      let result ← IO.FS.readFile args |>.toBaseIO
+      match result with
+      | .ok content => return content
+      | .error e => return s!"Error reading file: {e}"
+  | "write_file" =>
+      -- Parse "path content" from args
+      match args.splitOn " " with
+      | path :: rest =>
+          let content := " ".intercalate rest
+          let result ← (IO.FS.writeFile path content) |>.toBaseIO
+          match result with
+          | .ok _ => return s!"Successfully wrote to {path}"
+          | .error e => return s!"Error writing file: {e}"
+      | _ => return "Error: write_file requires <path> <content>"
+  | _ => return s!"Unknown tool: {name}"
+
 /-- React mode: full agent with tools. -/
 def runReactMode (cfg : CLIConfig) : IO UInt32 := do
   if cfg.verbose then
@@ -356,7 +469,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
     IO.println s!"Endpoint: {cfg.endpoint}"
     IO.println s!"Model: {cfg.model}"
     IO.println s!"Task: {cfg.task}"
-    IO.println s!"Max steps: {cfg.maxSteps}"
+    IO.println s!"Max turns: {cfg.maxTurns}"
     IO.println s!"Max cost: {cfg.maxCost}"
     IO.println s!"Headless: {cfg.headless}"
     IO.println ""
@@ -366,17 +479,85 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
     stepCount := 0
     cost := 0
     config := {
-      limits := { maxSteps := cfg.maxSteps, maxCost := cfg.maxCost }
+      limits := { maxSteps := cfg.maxTurns, maxCost := cfg.maxCost }
       tools := ["bash", "read_file", "write_file"]
       headless := cfg.headless
     }
   }
   if cfg.verbose then
     IO.println s!"Starting agent..."
-  -- TODO: Replace with real HTTP-backed oracles
-  -- For now, still using mock oracles
-  let finalState := runWith mockOracles initialState
-  IO.println s!"Agent completed."
+  -- Real agent loop with LLM calls
+  let llmCfg : LiteLLMConfig := {
+    endpoint := cfg.endpoint
+    model := cfg.model
+    apiKey := cfg.apiKey
+  }
+  let systemPrompt := reactSystemPrompt cfg.task
+  -- Run the agent loop manually (can't use runIO without proper IOOracles setup)
+  let mut state := initialState
+  let mut iteration := 0
+  while !state.isTerminal && iteration < cfg.maxSteps do
+    iteration := iteration + 1
+    if cfg.verbose then
+      IO.println s!"[Step {iteration}] Phase: {repr state.phase}"
+    match state.phase with
+    | .thinking =>
+        -- Call LLM
+        let messages := traceToMessages systemPrompt state.trace
+        if cfg.verbose then
+          IO.println s!"  Calling LLM with {messages.length} messages..."
+        let response ← callLiteLLM llmCfg messages
+        let content ← extractContent response
+        if cfg.verbose then
+          IO.println s!"  LLM response: {content.take 200}..."
+        -- Parse thought/action
+        match parseThoughtAction content with
+        | some (thought, action) =>
+            IO.println s!"Thought: {thought}"
+            let actionStr := match action with
+              | .toolCall name args => s!"{name} {args}"
+              | .submit output => s!"submit {output}"
+              | .requestInput p => s!"request_input {p}"
+            IO.println s!"Action: {actionStr}"
+            state := { state with phase := .acting thought action, cost := state.cost + 1 }
+        | none =>
+            IO.println s!"Error: Could not parse response:\n{content}"
+            state := { state with phase := .done (.error "Failed to parse LLM response") }
+    | .acting thought action =>
+        match action with
+        | .toolCall name args =>
+            IO.println s!"Executing: {name} {args}"
+            let obs ← executeTool cfg.workDir name args
+            IO.println s!"Observation: {obs.take 500}"
+            let step : Step := ⟨thought, action, obs⟩
+            state := { state with
+              phase := .thinking
+              trace := state.trace ++ [step]
+              stepCount := state.stepCount + 1
+            }
+        | .submit output =>
+            IO.println s!"Submitting: {output}"
+            state := { state with phase := .done (.submitted output) }
+        | .requestInput prompt =>
+            if cfg.headless then
+              state := { state with phase := .done (.error "Headless agent cannot request input") }
+            else
+              state := { state with phase := .needsInput prompt }
+    | .needsInput prompt =>
+        IO.println s!"Agent requests input: {prompt}"
+        IO.print "> "
+        let input ← (← IO.getStdin).getLine
+        let step : Step := ⟨"Received user input", .requestInput prompt, input.trim⟩
+        state := { state with
+          phase := .thinking
+          trace := state.trace ++ [step]
+        }
+    | .done _ => break
+  -- Check if we hit step limit
+  if iteration ≥ cfg.maxSteps && !state.isTerminal then
+    state := { state with phase := .done .stepLimitReached }
+  let finalState := state
+  IO.println s!"\nAgent completed."
   IO.println s!"  Final phase: {repr finalState.phase}"
   IO.println s!"  Steps taken: {finalState.stepCount}"
   IO.println s!"  Cost: {finalState.cost}"
