@@ -9,14 +9,16 @@ import ReActAgent.LLM.Http
 
 namespace LLM
 
+open Lean (Json ToJson FromJson)
+
 /-- A chat message for the OpenAI API. -/
 structure ChatMessage where
   role : String
   content : String
+  deriving Repr
 
-/-- Convert ChatMessage to JSON. -/
-def ChatMessage.toJson (m : ChatMessage) : String :=
-  Json.object [("role", Json.string m.role), ("content", Json.string m.content)]
+instance : ToJson ChatMessage where
+  toJson m := Json.mkObj [("role", m.role), ("content", m.content)]
 
 /-- Configuration for LLM API. -/
 structure Config where
@@ -26,47 +28,35 @@ structure Config where
 
 /-- Call LLM API with a list of messages. -/
 def call (cfg : Config) (messages : List ChatMessage) : IO String := do
-  let messagesJson := Json.array (messages.map ChatMessage.toJson)
-  let body := Json.object [
-    ("model", Json.string cfg.model),
+  let messagesJson := mkArr (messages.map ToJson.toJson)
+  let body := mkObj [
+    ("model", cfg.model),
     ("messages", messagesJson)
   ]
   let headers := [
     ("Content-Type", "application/json")
   ] ++ (if cfg.apiKey.isEmpty then [] else [("Authorization", s!"Bearer {cfg.apiKey}")])
-  let response ← Http.post cfg.endpoint body headers
+  let response ← Http.post cfg.endpoint (render body) headers
   return response
 
-/-- Extract content from OpenAI-style JSON response (simple parsing). -/
+/-- Extract content from OpenAI-style JSON response. -/
 def extractContent (response : String) : IO String := do
-  -- Simple extraction: find "content": "..." pattern
-  -- This is fragile but avoids needing a full JSON parser
-  let contentKey := "\"content\":"
-  match response.splitOn contentKey with
-  | _ :: rest :: _ =>
-      let afterKey := rest.trimLeft
-      if afterKey.startsWith "\"" then
-        let inner := afterKey.drop 1
-        -- Find closing quote (not escaped)
-        let mut result := ""
-        let mut escaped := false
-        for c in inner.toList do
-          if escaped then
-            match c with
-            | 'n' => result := result.push '\n'
-            | 'r' => result := result.push '\r'
-            | 't' => result := result.push '\t'
-            | _ => result := result.push c
-            escaped := false
-          else if c == '\\' then
-            escaped := true
-          else if c == '"' then
-            return result
+  match Json.parse response with
+  | .error e => throw <| IO.userError s!"Failed to parse JSON: {e}"
+  | .ok json =>
+      -- Navigate: .choices[0].message.content
+      match json.getObjValAs? (Array Json) "choices" with
+      | .error _ => throw <| IO.userError s!"Missing 'choices' in response: {response.take 200}"
+      | .ok choices =>
+          if h : choices.size > 0 then
+            let firstChoice := choices[0]
+            match firstChoice.getObjValAs? Json "message" with
+            | .error _ => throw <| IO.userError s!"Missing 'message' in choice"
+            | .ok message =>
+                match message.getObjValAs? String "content" with
+                | .error _ => throw <| IO.userError s!"Missing 'content' in message"
+                | .ok content => return content
           else
-            result := result.push c
-        return result
-      else
-        throw <| IO.userError s!"Expected string after content key, got: {afterKey.take 50}"
-  | _ => throw <| IO.userError s!"Could not find content in response: {response.take 200}"
+            throw <| IO.userError "Empty 'choices' array in response"
 
 end LLM

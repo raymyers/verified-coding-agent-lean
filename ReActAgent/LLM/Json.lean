@@ -1,29 +1,28 @@
 /-
 # JSON Helpers
 
-Simple JSON serialization utilities for LLM API communication.
+JSON serialization using Lean.Data.Json.
 -/
 
-namespace LLM.Json
+import Lean.Data.Json
 
-/-- Escape a string for JSON. -/
-def escape (s : String) : String :=
-  s.replace "\\" "\\\\"
-   |>.replace "\"" "\\\""
-   |>.replace "\n" "\\n"
-   |>.replace "\r" "\\r"
-   |>.replace "\t" "\\t"
+namespace LLM
 
-/-- Build a JSON string value. -/
-def string (s : String) : String := s!"\"{escape s}\""
+open Lean (Json ToJson FromJson)
+
+/-- Re-export Lean.Json for convenience. -/
+abbrev Json := Lean.Json
 
 /-- Build a JSON object from key-value pairs. -/
-def object (pairs : List (String × String)) : String :=
-  let inner := pairs.map (fun (k, v) => s!"\"{k}\": {v}") |> String.intercalate ", "
-  s!"\{{inner}}"
+def mkObj (pairs : List (String × Json)) : Json :=
+  Json.mkObj pairs
 
-/-- Build a JSON array. -/
-def array (items : List String) : String :=
-  s!"[{String.intercalate ", " items}]"
+/-- Convert a list to a JSON array. -/
+def mkArr (items : List Json) : Json :=
+  Json.arr items.toArray
 
-end LLM.Json
+/-- Render JSON to a compact string. -/
+def render (j : Json) : String :=
+  j.compress
+
+end LLM
