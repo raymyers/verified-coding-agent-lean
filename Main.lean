@@ -207,15 +207,16 @@ def runPromptMode (cfg : CLIConfig) : IO UInt32 := do
     model := cfg.model
     apiKey := cfg.apiKey
   }
-  let messages := [{ role := "user", content := cfg.task : LLM.ChatMessage }]
+  let messages := [LLM.ChatMessage.text "user" cfg.task]
   if cfg.verbose then
     IO.println "Calling LLM..."
   let response ← LLM.call llmCfg messages
   if cfg.verbose then
     IO.println s!"Raw response: {response}"
     IO.println ""
-  let content ← LLM.extractContent response
-  IO.println content
+  match ← LLM.parseResponse response with
+  | .content text => IO.println text
+  | .toolCalls _ _ => IO.println "Unexpected tool calls in prompt mode"
   return 0
 
 /-- Chat mode: multi-turn conversation without tools. -/
@@ -230,17 +231,18 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
     model := cfg.model
     apiKey := cfg.apiKey
   }
-  let systemPrompt := "You are a helpful assistant."
   let mut messages : List LLM.ChatMessage := [
-    { role := "system", content := systemPrompt },
-    { role := "user", content := cfg.task }
+    LLM.ChatMessage.text "system" "You are a helpful assistant.",
+    LLM.ChatMessage.text "user" cfg.task
   ]
   IO.println s!"You: {cfg.task}"
   -- First response
   let response ← LLM.call llmCfg messages
-  let content ← LLM.extractContent response
+  let content ← match ← LLM.parseResponse response with
+    | .content text => pure text
+    | .toolCalls _ _ => pure "(unexpected tool call)"
   IO.println s!"Assistant: {content}"
-  messages := messages ++ [{ role := "assistant", content := content }]
+  messages := messages ++ [LLM.ChatMessage.text "assistant" content]
   -- Chat loop
   let stdin ← IO.getStdin
   repeat do
@@ -249,11 +251,13 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
     let input := line.trim
     if input.isEmpty || input == "quit" || input == "exit" then
       break
-    messages := messages ++ [{ role := "user", content := input }]
+    messages := messages ++ [LLM.ChatMessage.text "user" input]
     let response ← LLM.call llmCfg messages
-    let content ← LLM.extractContent response
+    let content ← match ← LLM.parseResponse response with
+      | .content text => pure text
+      | .toolCalls _ _ => pure "(unexpected tool call)"
     IO.println s!"Assistant: {content}"
-    messages := messages ++ [{ role := "assistant", content := content }]
+    messages := messages ++ [LLM.ChatMessage.text "assistant" content]
   return 0
 
 /-! ## ReAct Agent Implementation -/
@@ -264,194 +268,152 @@ def reactSystemPrompt (task : String) : String :=
 
 TASK: {task}
 
-You must respond in this exact format:
+Use the provided tools to accomplish the task. When finished, call the submit tool with your result."
 
-Thought: <your reasoning about what to do next>
-Action: <action_name> <arguments>
+/-- Tool definitions for the agent. -/
+def agentTools : List LLM.ToolFunction := [
+  { name := "bash"
+    description := "Execute a shell command"
+    parameters := [{ name := "command", type := "string", description := "The command to execute" }]
+    required := ["command"] },
+  { name := "read_file"
+    description := "Read a file's contents"
+    parameters := [{ name := "path", type := "string", description := "Path to the file" }]
+    required := ["path"] },
+  { name := "write_file"
+    description := "Write content to a file"
+    parameters := [
+      { name := "path", type := "string", description := "Path to the file" },
+      { name := "content", type := "string", description := "Content to write" }
+    ]
+    required := ["path", "content"] },
+  { name := "submit"
+    description := "Submit the final result and complete the task"
+    parameters := [{ name := "result", type := "string", description := "The final result or answer" }]
+    required := ["result"] }
+]
 
-Available actions:
-- bash <command>: Execute a shell command
-- read_file <path>: Read a file's contents
-- write_file <path> <content>: Write content to a file
-- submit <result>: Submit your final answer and complete the task
+/-- Extract argument from tool call JSON. -/
+def getToolArg (args : String) (key : String) : IO String := do
+  match Lean.Json.parse args with
+  | .error e => throw <| IO.userError s!"Failed to parse tool arguments: {e}"
+  | .ok json =>
+      match json.getObjValAs? String key with
+      | .ok val => return val
+      | .error _ => throw <| IO.userError s!"Missing argument '{key}' in tool call"
 
-Rules:
-1. Always start with a Thought explaining your reasoning
-2. Then provide exactly ONE Action
-3. Wait for the observation before your next step
-4. Use 'submit' when the task is complete
+/-- Convert a tool call to an Action. -/
+def toolCallToAction (tc : LLM.ToolCall) : IO Action := do
+  match tc.name with
+  | "bash" =>
+      let cmd ← getToolArg tc.arguments "command"
+      return .toolCall "bash" cmd
+  | "read_file" =>
+      let path ← getToolArg tc.arguments "path"
+      return .toolCall "read_file" path
+  | "write_file" =>
+      let path ← getToolArg tc.arguments "path"
+      let content ← getToolArg tc.arguments "content"
+      return .toolCall "write_file" s!"{path} {content}"
+  | "submit" =>
+      let result ← getToolArg tc.arguments "result"
+      return .submit result
+  | other => throw <| IO.userError s!"Unknown tool: {other}"
 
-Example:
-Thought: I need to see what files are in the current directory.
-Action: bash ls -la"
+/-- A pending tool call with its raw JSON for message history. -/
+structure PendingToolCall where
+  call : LLM.ToolCall
+  raw : Lean.Json
+  action : Action
 
-/-- Parse thought and action from LLM response. -/
-def parseThoughtAction (response : String) : Option (String × Action) := do
-  -- Find Thought:
-  let thoughtStart := response.splitOn "Thought:"
-  guard (thoughtStart.length > 1)
-  let afterThought := thoughtStart[1]!
-  -- Find Action:
-  let actionSplit := afterThought.splitOn "Action:"
-  guard (actionSplit.length > 1)
-  let thought := actionSplit[0]!.trim
-  let actionLine := actionSplit[1]!.trim.splitOn "\n" |>.head!.trim
-  -- Parse action
-  let action ← parseActionLine actionLine
-  return (thought, action)
-where
-  parseActionLine (line : String) : Option Action := do
-    let parts := line.splitOn " "
-    guard (parts.length ≥ 1)
-    let cmd := parts[0]!
-    let args := " ".intercalate (parts.drop 1)
-    match cmd with
-    | "bash" => some (.toolCall "bash" args)
-    | "read_file" => some (.toolCall "read_file" args)
-    | "write_file" => some (.toolCall "write_file" args)
-    | "submit" => some (.submit args)
-    | _ => none
+/-- Convert trace to chat messages for LLM (using tool calling format). -/
+def traceToMessages (systemPrompt : String) (trace : List (PendingToolCall × String))
+    : List LLM.ChatMessage :=
+  let system := LLM.ChatMessage.text "system" systemPrompt
+  let history := trace.flatMap fun (tc, observation) =>
+    [ LLM.ChatMessage.withToolCalls #[tc.raw],
+      LLM.ChatMessage.toolResult tc.call.id tc.call.name observation ]
+  [system] ++ history
 
-/-- Convert trace to chat messages for LLM. -/
-def traceToMessages (systemPrompt : String) (trace : Trace) : List LLM.ChatMessage :=
-  let system : LLM.ChatMessage := { role := "system", content := systemPrompt }
-  let history := trace.flatMap fun step =>
-    let assistantMsg : LLM.ChatMessage := {
-      role := "assistant"
-      content := s!"Thought: {step.thought}\nAction: {formatAction step.action}"
-    }
-    let userMsg : LLM.ChatMessage := {
-      role := "user"
-      content := s!"Observation: {step.observation}"
-    }
-    [assistantMsg, userMsg]
-  let continueMsg : LLM.ChatMessage := {
-    role := "user"
-    content := if trace.isEmpty then
-      "Begin working on the task. Start with your first thought and action."
-    else
-      "Continue with your next thought and action."
-  }
-  [system] ++ history ++ [continueMsg]
-where
-  formatAction : Action → String
-    | .toolCall name args => s!"{name} {args}"
-    | .submit output => s!"submit {output}"
-    | .requestInput prompt => s!"request_input {prompt}"
-
-/-- Create IO oracles from CLI configuration.
-    The LLM oracle captures the system prompt and config in a closure. -/
-def mkIOOracles (cfg : CLIConfig) (systemPrompt : String) (verbose : Bool) : IOOracles :=
+/-- React mode: full agent with tool calling. -/
+def runReactMode (cfg : CLIConfig) : IO UInt32 := do
+  if cfg.verbose then
+    IO.println s!"Mode: react (full agent with tool calling)"
+    IO.println s!"Endpoint: {cfg.endpoint}"
+    IO.println s!"Model: {cfg.model}"
+    IO.println s!"Task: {cfg.task}"
+    IO.println s!"Max turns: {cfg.maxTurns}"
+    IO.println ""
   let llmCfg : LLM.Config := {
     endpoint := cfg.endpoint
     model := cfg.model
     apiKey := cfg.apiKey
   }
-  { llm := fun trace => do
-      let messages := traceToMessages systemPrompt trace
-      if verbose then
-        IO.println s!"  Calling LLM with {messages.length} messages..."
-      let response ← LLM.call llmCfg messages
-      let content ← LLM.extractContent response
-      if verbose then
-        IO.println s!"  LLM response: {content.take 200}..."
-      match parseThoughtAction content with
-      | some (thought, action) => return { thought, action, cost := 1 }
-      | none => throw <| IO.userError s!"Failed to parse LLM response:\n{content}"
-    env := fun name args => Tools.execute cfg.workDir name args
-    user := fun prompt => do
-      IO.println s!"Agent requests input: {prompt}"
-      IO.print "> "
-      let line ← (← IO.getStdin).getLine
-      return line.trim
-  }
-
-/-- Log the current phase for verbose output. -/
-def logPhase (state : State) (verbose : Bool) : IO Unit := do
-  if verbose then
-    IO.println s!"[Step {state.stepCount + 1}] Phase: {repr state.phase}"
-  match state.phase with
-  | .acting thought action =>
-      IO.println s!"Thought: {thought}"
-      let actionStr := match action with
-        | .toolCall name args => s!"{name} {args}"
-        | .submit output => s!"submit {output}"
-        | .requestInput p => s!"request_input {p}"
-      IO.println s!"Action: {actionStr}"
-  | _ => pure ()
-
-/-- Log observation after tool execution. -/
-def logObservation (oldState newState : State) : IO Unit := do
-  -- If we just executed a tool, log the observation
-  if newState.trace.length > oldState.trace.length then
-    if let some step := newState.trace.getLast? then
-      IO.println s!"Observation: {step.observation.take 500}"
-
-/-- React mode: full agent with tools using verified stepIO. -/
-def runReactMode (cfg : CLIConfig) : IO UInt32 := do
-  if cfg.verbose then
-    IO.println s!"Mode: react (full agent)"
-    IO.println s!"Endpoint: {cfg.endpoint}"
-    IO.println s!"Model: {cfg.model}"
-    IO.println s!"Task: {cfg.task}"
-    IO.println s!"Max turns: {cfg.maxTurns}"
-    IO.println s!"Max cost: {cfg.maxCost}"
-    IO.println s!"Headless: {cfg.headless}"
-    IO.println ""
-  let initialState : State := {
-    phase := .thinking
-    trace := []
-    stepCount := 0
-    cost := 0
-    config := {
-      limits := { maxSteps := cfg.maxTurns, maxCost := cfg.maxCost }
-      tools := ["bash", "read_file", "write_file"]
-      headless := cfg.headless
-    }
-  }
-  if cfg.verbose then
-    IO.println s!"Starting agent..."
   let systemPrompt := reactSystemPrompt cfg.task
-  let oracles := mkIOOracles cfg systemPrompt cfg.verbose
-  -- Run using verified stepIO
-  let mut state := initialState
-  while !state.isTerminal do
-    logPhase state cfg.verbose
-    let stepResult ← stepIO oracles state |>.toBaseIO
-    match stepResult with
-    | .ok (some newState) =>
-        logObservation state newState
-        state := newState
-    | .ok none =>
-        -- Blocked (headless requesting input)
-        state := { state with phase := .done (.error "Agent blocked") }
-    | .error e =>
-        IO.println s!"Error: {e}"
-        state := { state with phase := .done (.error s!"{e}") }
-  let finalState := state
+  -- Track conversation history for tool calling
+  let mut history : List (PendingToolCall × String) := []
+  let mut stepCount := 0
+  let mut done := false
+  let mut finalResult : Option String := none
+  let mut errorMsg : Option String := none
+  while !done && stepCount < cfg.maxTurns do
+    stepCount := stepCount + 1
+    if cfg.verbose then
+      IO.println s!"[Step {stepCount}]"
+    -- Build messages and call LLM
+    let messages := traceToMessages systemPrompt history
+    if cfg.verbose then
+      IO.println s!"  Calling LLM with {messages.length} messages..."
+    let response ← LLM.call llmCfg messages agentTools
+    -- Parse response
+    match ← LLM.parseResponse response with
+    | .content text =>
+        IO.println s!"Assistant: {text}"
+        -- Model responded with text instead of tool call - treat as done
+        finalResult := some text
+        done := true
+    | .toolCalls calls rawCalls =>
+        -- Process first tool call (could extend to handle multiple)
+        if h : calls.size > 0 then
+          let tc := calls[0]
+          let rawJson := if h2 : rawCalls.size > 0 then rawCalls[0] else Lean.Json.null
+          if cfg.verbose then
+            IO.println s!"  Tool call: {tc.name}({tc.arguments})"
+          -- Convert to Action and execute
+          let action ← toolCallToAction tc
+          match action with
+          | .submit result =>
+              IO.println s!"Submit: {result}"
+              finalResult := some result
+              done := true
+          | .toolCall name args =>
+              IO.println s!"Tool: {name}"
+              let observation ← Tools.execute cfg.workDir name args
+              IO.println s!"Observation: {observation.take 500}"
+              -- Add to history
+              let pending : PendingToolCall := { call := tc, raw := rawJson, action }
+              history := history ++ [(pending, observation)]
+          | .requestInput _ =>
+              errorMsg := some "requestInput not supported with tool calling"
+              done := true
+        else
+          errorMsg := some "Empty tool calls array"
+          done := true
+  -- Report results
   IO.println s!"\nAgent completed."
-  IO.println s!"  Final phase: {repr finalState.phase}"
-  IO.println s!"  Steps taken: {finalState.stepCount}"
-  IO.println s!"  Cost: {finalState.cost}"
-  match finalState.phase with
-  | .done (.submitted output) =>
-      IO.println s!"  Output: {output}"
-      return 0
-  | .done .stepLimitReached =>
-      IO.println "  Error: Step limit reached"
+  IO.println s!"  Steps taken: {stepCount}"
+  match errorMsg with
+  | some e =>
+      IO.println s!"  Error: {e}"
       return 1
-  | .done .costLimitReached =>
-      IO.println "  Error: Cost limit reached"
-      return 1
-  | .done (.error msg) =>
-      IO.println s!"  Error: {msg}"
-      return 1
-  | .needsInput prompt =>
-      IO.println s!"  Blocked on input: {prompt}"
-      return 1
-  | _ =>
-      IO.println "  Error: Agent did not terminate properly"
-      return 1
+  | none =>
+      match finalResult with
+      | some result =>
+          IO.println s!"  Result: {result}"
+          return 0
+      | none =>
+          IO.println s!"  Error: Max turns reached"
+          return 1
 
 /-- Run the agent with the given configuration. -/
 def runAgent (cfg : CLIConfig) : IO UInt32 := do
