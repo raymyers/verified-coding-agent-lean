@@ -111,16 +111,45 @@ def ToolCall.fromJson? (j : Json) : Option ToolCall := do
 def ToolCall.idFromJson (j : Json) : String :=
   j.getObjValAs? String "id" |>.toOption |>.getD ""
 
+/-- If fromJson? succeeds, idFromJson returns the same ID. -/
+theorem ToolCall.idFromJson_eq_of_fromJson (j : Json) (tc : ToolCall)
+    (h : ToolCall.fromJson? j = some tc) : ToolCall.idFromJson j = tc.id := by
+  unfold fromJson? at h
+  simp only [bind, Option.bind] at h
+  -- Case split on each nested option
+  cases hid : (j.getObjValAs? String "id").toOption with
+  | none => simp [hid] at h
+  | some id =>
+    cases hfn : (j.getObjValAs? Json "function").toOption with
+    | none => simp [hid, hfn] at h
+    | some fn =>
+      cases hname : (fn.getObjValAs? String "name").toOption with
+      | none => simp [hid, hfn, hname] at h
+      | some name =>
+        cases hargs : (fn.getObjValAs? String "arguments").toOption with
+        | none => simp [hid, hfn, hname, hargs] at h
+        | some args =>
+          -- h : some { id, name, arguments := args } = some tc
+          simp [hid, hfn, hname, hargs] at h
+          simp only [idFromJson, hid, Option.getD]
+          rw [← h]
+
 /-- Extract all tool call IDs from a JSON array. -/
 def extractToolCallIds (toolCalls : Array Json) : List String :=
   toolCalls.toList.map ToolCall.idFromJson
 
 /-! ## LLM Response -/
 
+/-- A parsed tool call paired with its original JSON. -/
+structure ParsedToolCall where
+  call : ToolCall
+  raw : Json
+  consistent : ToolCall.idFromJson raw = call.id
+
 /-- Parsed LLM response - either content or tool calls. -/
 inductive Response where
   | content (text : String)
-  | toolCalls (calls : Array ToolCall) (raw : Array Json)
+  | toolCalls (calls : Array ParsedToolCall)
 
 /-! ## Configuration -/
 
@@ -218,6 +247,13 @@ def call (cfg : Config) (req : Request) : IO String := do
   let response ← Http.post cfg.endpoint (render body) headers
   return response
 
+/-- Parse a JSON array into ParsedToolCall pairs with consistency proofs. -/
+def parseToolCalls (toolCallsJson : Array Json) : Array ParsedToolCall :=
+  toolCallsJson.filterMap fun raw =>
+    match h : ToolCall.fromJson? raw with
+    | none => none
+    | some call => some ⟨call, raw, ToolCall.idFromJson_eq_of_fromJson raw call h⟩
+
 /-- Parse LLM response to extract content or tool calls. -/
 def parseResponse (response : String) : IO Response := do
   match Json.parse response with
@@ -234,10 +270,10 @@ def parseResponse (response : String) : IO Response := do
                 -- Check for tool_calls first
                 match message.getObjValAs? (Array Json) "tool_calls" with
                 | .ok toolCallsJson =>
-                    let toolCalls := toolCallsJson.filterMap ToolCall.fromJson?
+                    let toolCalls := parseToolCalls toolCallsJson
                     if toolCalls.isEmpty then
                       throw <| IO.userError "Failed to parse tool calls"
-                    return .toolCalls toolCalls toolCallsJson
+                    return .toolCalls toolCalls
                 | .error _ =>
                     -- Fall back to content
                     match message.getObjValAs? String "content" with

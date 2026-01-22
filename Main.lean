@@ -216,7 +216,7 @@ def runPromptMode (cfg : CLIConfig) : IO UInt32 := do
     IO.println ""
   match ← LLM.parseResponse response with
   | .content text => IO.println text
-  | .toolCalls _ _ => IO.println "Unexpected tool calls in prompt mode"
+  | .toolCalls _ => IO.println "Unexpected tool calls in prompt mode"
   return 0
 
 /-- Chat mode: multi-turn conversation without tools. -/
@@ -240,7 +240,7 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
   let response ← LLM.call llmCfg ⟨messages, []⟩
   let content ← match ← LLM.parseResponse response with
     | .content text => pure text
-    | .toolCalls _ _ => pure "(unexpected tool call)"
+    | .toolCalls _ => pure "(unexpected tool call)"
   IO.println s!"Assistant: {content}"
   messages := messages ++ [LLM.ChatMessage.text "assistant" content]
   -- Chat loop
@@ -255,7 +255,7 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
     let response ← LLM.call llmCfg ⟨messages, []⟩
     let content ← match ← LLM.parseResponse response with
       | .content text => pure text
-      | .toolCalls _ _ => pure "(unexpected tool call)"
+      | .toolCalls _ => pure "(unexpected tool call)"
     IO.println s!"Assistant: {content}"
     messages := messages ++ [LLM.ChatMessage.text "assistant" content]
   return 0
@@ -320,11 +320,13 @@ def toolCallToAction (tc : LLM.ToolCall) : IO Action := do
       return .submit result
   | other => throw <| IO.userError s!"Unknown tool: {other}"
 
-/-- A pending tool call with its raw JSON for message history. -/
+/-- A pending tool call with its raw JSON for message history.
+    The consistency field ensures the raw JSON ID matches the parsed call ID. -/
 structure PendingToolCall where
   call : LLM.ToolCall
   raw : Lean.Json
   action : Action
+  consistent : LLM.ToolCall.idFromJson raw = call.id
 
 /-- Convert trace to chat messages for LLM (using tool calling format).
     Always includes a user message with the task to satisfy API requirements. -/
@@ -344,17 +346,28 @@ theorem traceHistory_wellFormed (trace : List (PendingToolCall × String)) :
       [ LLM.ChatMessage.withToolCalls #[tc.raw],
         LLM.ChatMessage.toolResult tc.call.id tc.call.name observation ]) = true := by
   induction trace with
-  | nil => simp [LLM.toolCallsWellFormed]
+  | nil => simp only [List.flatMap_nil, LLM.toolCallsWellFormed]
   | cons hd tl ih =>
-      simp only [List.flatMap_cons]
-      -- The pattern is: [assistant with toolCalls, toolResult] ++ rest
-      -- We need to show the tool call ID in assistant matches the tool result's ID
-      simp only [LLM.toolCallsWellFormed, LLM.ChatMessage.withToolCalls,
-                 LLM.extractToolCallIds, LLM.ToolCall.idFromJson,
-                 LLM.toolResultsMatch, LLM.ChatMessage.toolResult]
-      -- The match depends on extracting ID from tc.raw matching tc.call.id
-      -- This requires knowing the JSON structure - for now use sorry
-      sorry
+      -- Expand flatMap on the cons
+      change LLM.toolCallsWellFormed
+        ([ LLM.ChatMessage.withToolCalls #[hd.fst.raw],
+           LLM.ChatMessage.toolResult hd.fst.call.id hd.fst.call.name hd.snd ] ++
+         tl.flatMap fun (tc, observation) =>
+           [ LLM.ChatMessage.withToolCalls #[tc.raw],
+             LLM.ChatMessage.toolResult tc.call.id tc.call.name observation ]) = true
+      -- Use hd.fst.consistent: idFromJson hd.fst.raw = hd.fst.call.id
+      have hcons := hd.fst.consistent
+      -- Simplify the message constructors
+      simp only [LLM.ChatMessage.withToolCalls, LLM.ChatMessage.toolResult,
+                 List.cons_append, List.nil_append]
+      -- Unfold toolCallsWellFormed, extractToolCallIds, and toolResultsMatch
+      unfold LLM.toolCallsWellFormed LLM.extractToolCallIds LLM.toolResultsMatch
+      -- Simplify boolean expressions
+      simp only [List.map, beq_self_eq_true, Bool.true_and]
+      -- Use hcons to prove ID match, simplify toolResultsMatch [] and List.drop
+      simp only [hcons, LLM.toolResultsMatch, List.length_singleton, List.drop_one,
+                 List.tail_cons, beq_self_eq_true, Bool.true_and]
+      exact ih
 
 /-- Any request built from traceToMessages is valid. -/
 theorem traceToMessages_valid (systemPrompt task : String)
@@ -413,15 +426,14 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
         -- Model responded with text instead of tool call - treat as done
         finalResult := some text
         done := true
-    | .toolCalls calls rawCalls =>
+    | .toolCalls parsedCalls =>
         -- Process first tool call (could extend to handle multiple)
-        if h : calls.size > 0 then
-          let tc := calls[0]
-          let rawJson := if h2 : rawCalls.size > 0 then rawCalls[0] else Lean.Json.null
+        if h : parsedCalls.size > 0 then
+          let ptc := parsedCalls[0]
           if cfg.verbose then
-            IO.println s!"  Tool call: {tc.name}({tc.arguments})"
+            IO.println s!"  Tool call: {ptc.call.name}({ptc.call.arguments})"
           -- Convert to Action and execute
-          let action ← toolCallToAction tc
+          let action ← toolCallToAction ptc.call
           match action with
           | .submit result =>
               IO.println s!"Submit: {result}"
@@ -431,8 +443,9 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
               IO.println s!"Tool: {name}"
               let observation ← Tools.execute cfg.workDir name args
               IO.println s!"Observation: {observation.take 500}"
-              -- Add to history
-              let pending : PendingToolCall := { call := tc, raw := rawJson, action }
+              -- Add to history (consistency proof comes from ParsedToolCall)
+              let pending : PendingToolCall :=
+                { call := ptc.call, raw := ptc.raw, action, consistent := ptc.consistent }
               history := history ++ [(pending, observation)]
           | .requestInput _ =>
               errorMsg := some "requestInput not supported with tool calling"
