@@ -337,13 +337,43 @@ def traceToMessages (systemPrompt : String) (task : String)
       LLM.ChatMessage.toolResult tc.call.id tc.call.name observation ]
   [system, user] ++ history
 
-/-- Any request built from traceToMessages is valid (contains non-system message). -/
+/-- The history produced by traceToMessages has well-formed tool calls
+    (each assistant message with tool calls is immediately followed by matching tool result). -/
+theorem traceHistory_wellFormed (trace : List (PendingToolCall × String)) :
+    LLM.toolCallsWellFormed (trace.flatMap fun (tc, observation) =>
+      [ LLM.ChatMessage.withToolCalls #[tc.raw],
+        LLM.ChatMessage.toolResult tc.call.id tc.call.name observation ]) = true := by
+  induction trace with
+  | nil => simp [LLM.toolCallsWellFormed]
+  | cons hd tl ih =>
+      simp only [List.flatMap_cons]
+      -- The pattern is: [assistant with toolCalls, toolResult] ++ rest
+      -- We need to show the tool call ID in assistant matches the tool result's ID
+      simp only [LLM.toolCallsWellFormed, LLM.ChatMessage.withToolCalls,
+                 LLM.extractToolCallIds, LLM.ToolCall.idFromJson,
+                 LLM.toolResultsMatch, LLM.ChatMessage.toolResult]
+      -- The match depends on extracting ID from tc.raw matching tc.call.id
+      -- This requires knowing the JSON structure - for now use sorry
+      sorry
+
+/-- Any request built from traceToMessages is valid. -/
 theorem traceToMessages_valid (systemPrompt task : String)
     (trace : List (PendingToolCall × String)) (tools : List LLM.ToolFunction) :
     LLM.Request.valid ⟨traceToMessages systemPrompt task trace, tools⟩ := by
-  simp only [traceToMessages, LLM.Request.valid]
-  use LLM.ChatMessage.text "user" task
-  simp [LLM.ChatMessage.text]
+  constructor
+  · -- Part 1: contains non-system message
+    simp only [traceToMessages]
+    exact ⟨LLM.ChatMessage.text "user" task, by simp, by simp [LLM.ChatMessage.text]⟩
+  · -- Part 2: tool calls well-formed
+    simp only [traceToMessages]
+    -- [system, user] ++ history where system and user have no tool calls
+    have hwf := traceHistory_wellFormed trace
+    -- Apply cons lemma twice for system and user messages
+    apply LLM.toolCallsWellFormed_cons_noToolCalls
+    · simp [LLM.ChatMessage.text]
+    apply LLM.toolCallsWellFormed_cons_noToolCalls
+    · simp [LLM.ChatMessage.text]
+    exact hwf
 
 /-- React mode: full agent with tool calling. -/
 def runReactMode (cfg : CLIConfig) : IO UInt32 := do

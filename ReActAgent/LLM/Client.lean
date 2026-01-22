@@ -107,6 +107,14 @@ def ToolCall.fromJson? (j : Json) : Option ToolCall := do
   let args ← fn.getObjValAs? String "arguments" |>.toOption
   return { id, name, arguments := args }
 
+/-- Extract tool call ID from JSON (returns "" if not found). -/
+def ToolCall.idFromJson (j : Json) : String :=
+  j.getObjValAs? String "id" |>.toOption |>.getD ""
+
+/-- Extract all tool call IDs from a JSON array. -/
+def extractToolCallIds (toolCalls : Array Json) : List String :=
+  toolCalls.toList.map ToolCall.idFromJson
+
 /-! ## LLM Response -/
 
 /-- Parsed LLM response - either content or tool calls. -/
@@ -129,22 +137,65 @@ structure Request where
   messages : List ChatMessage
   tools : List ToolFunction := []
 
-/-- A request is valid if it contains at least one message whose role is not "system".
-    Required by Anthropic API. -/
+/-- Check if a list of messages starts with tool results matching the given IDs in order. -/
+def toolResultsMatch (ids : List String) (messages : List ChatMessage) : Bool :=
+  match ids, messages with
+  | [], _ => true
+  | id :: restIds, msg :: restMsgs =>
+      msg.role == "tool" && msg.toolCallId == some id && toolResultsMatch restIds restMsgs
+  | _ :: _, [] => false
+
+/-- Check that all tool calls in a message list have matching tool results.
+    For each assistant message with tool_calls, the immediately following messages
+    must be tool results with matching IDs in the same order.
+
+    Note: This is a Bool-valued predicate for decidability. -/
+def toolCallsWellFormed : List ChatMessage → Bool
+  | [] => true
+  | msg :: rest =>
+      match msg.toolCalls with
+      | none => toolCallsWellFormed rest
+      | some tcs =>
+          let ids := extractToolCallIds tcs
+          -- Check that rest starts with matching tool results, then recurse on remainder
+          toolResultsMatch ids rest && toolCallsWellFormed (rest.drop ids.length)
+termination_by msgs => msgs.length
+decreasing_by
+  all_goals simp_wf
+  all_goals omega
+
+/-- A request is valid if:
+    1. It contains at least one non-system message (required by Anthropic API)
+    2. All tool calls have matching tool results in order -/
 def Request.valid (req : Request) : Prop :=
-  ∃ m ∈ req.messages, m.role ≠ "system"
+  (∃ m ∈ req.messages, m.role ≠ "system") ∧
+  toolCallsWellFormed req.messages
 
 /-! ## Request Validity Theorems -/
 
-theorem Request.valid_of_user (content : String) (rest : List ChatMessage)
-    (tools : List ToolFunction) :
-    Request.valid ⟨ChatMessage.text "user" content :: rest, tools⟩ :=
-  ⟨ChatMessage.text "user" content, .head _, by simp [ChatMessage.text]⟩
+/-- Empty message list is well-formed. -/
+theorem toolCallsWellFormed_nil : toolCallsWellFormed [] = true := by simp [toolCallsWellFormed]
 
-theorem Request.valid_of_assistant (tc : Array Json) (rest : List ChatMessage)
-    (tools : List ToolFunction) :
-    Request.valid ⟨ChatMessage.withToolCalls tc :: rest, tools⟩ :=
-  ⟨ChatMessage.withToolCalls tc, .head _, by simp [ChatMessage.withToolCalls]⟩
+/-- A message without tool calls preserves well-formedness. -/
+theorem toolCallsWellFormed_cons_noToolCalls (msg : ChatMessage) (rest : List ChatMessage)
+    (hno : msg.toolCalls = none) (hwf : toolCallsWellFormed rest = true) :
+    toolCallsWellFormed (msg :: rest) = true := by
+  simp only [toolCallsWellFormed, hno, hwf]
+
+/-- A request with a user message is valid if the rest is well-formed. -/
+theorem Request.valid_of_user (content : String) (rest : List ChatMessage)
+    (tools : List ToolFunction) (hwf : toolCallsWellFormed rest = true) :
+    Request.valid ⟨ChatMessage.text "user" content :: rest, tools⟩ := by
+  constructor
+  · exact ⟨ChatMessage.text "user" content, .head _, by simp [ChatMessage.text]⟩
+  · simp only [toolCallsWellFormed, ChatMessage.text, hwf]
+
+/-- A request with a user message and empty rest is valid. -/
+theorem Request.valid_of_user_nil (content : String) (tools : List ToolFunction) :
+    Request.valid ⟨[ChatMessage.text "user" content], tools⟩ := by
+  constructor
+  · exact ⟨ChatMessage.text "user" content, .head _, by simp [ChatMessage.text]⟩
+  · simp only [toolCallsWellFormed, ChatMessage.text]
 
 /-! ## API Calls -/
 
