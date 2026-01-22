@@ -1,0 +1,49 @@
+{
+  "spec_version": "1.81.1",
+  "source": "https://litellm-api.up.railway.app/openapi.json",
+  "extracted": "2026-01-22",
+  "request": {
+    "required": [
+      "model",
+      "messages"
+    ],
+    "optional_we_use": [
+      "tools",
+      "tool_choice"
+    ]
+  },
+  "messages": {
+    "user": {
+      "required": [
+        "role",
+        "content"
+      ],
+      "role_value": "user"
+    },
+    "system": {
+      "required": [
+        "role",
+        "content"
+      ],
+      "role_value": "system"
+    },
+    "assistant": {
+      "required": [
+        "role"
+      ],
+      "role_value": "assistant",
+      "optional_fields": [
+        "content",
+        "tool_calls"
+      ]
+    },
+    "tool": {
+      "required": [
+        "role",
+        "content",
+        "tool_call_id"
+      ],
+      "role_value": "tool"
+    }
+  }
+}
