@@ -21,11 +21,6 @@ structure ChatMessage where
   toolCallId : Option String := none
   name : Option String := none
 
-/-- A message list is valid for LLM APIs if it contains at least one message
-    whose role is not "system". Required by Anthropic. -/
-def validMessageList (messages : List ChatMessage) : Prop :=
-  ∃ m ∈ messages, m.role ≠ "system"
-
 /-- Build a user or system message. -/
 def ChatMessage.text (role content : String) : ChatMessage :=
   { role, content := some content }
@@ -37,16 +32,6 @@ def ChatMessage.withToolCalls (toolCalls : Array Json) : ChatMessage :=
 /-- Build a tool result message. -/
 def ChatMessage.toolResult (toolCallId name content : String) : ChatMessage :=
   { role := "tool", content := some content, toolCallId := some toolCallId, name := some name }
-
-/-! ## Message List Validity Theorems -/
-
-theorem validMessageList_cons_user (content : String) (rest : List ChatMessage) :
-    validMessageList (ChatMessage.text "user" content :: rest) :=
-  ⟨ChatMessage.text "user" content, .head _, by simp [ChatMessage.text]⟩
-
-theorem validMessageList_cons_assistant (tc : Array Json) (rest : List ChatMessage) :
-    validMessageList (ChatMessage.withToolCalls tc :: rest) :=
-  ⟨ChatMessage.withToolCalls tc, .head _, by simp [ChatMessage.withToolCalls]⟩
 
 instance : ToJson ChatMessage where
   toJson m :=
@@ -137,19 +122,42 @@ structure Config where
   model : String
   apiKey : String := ""
 
+/-! ## Request -/
+
+/-- An LLM API request with messages and optional tools. -/
+structure Request where
+  messages : List ChatMessage
+  tools : List ToolFunction := []
+
+/-- A request is valid if it contains at least one message whose role is not "system".
+    Required by Anthropic API. -/
+def Request.valid (req : Request) : Prop :=
+  ∃ m ∈ req.messages, m.role ≠ "system"
+
+/-! ## Request Validity Theorems -/
+
+theorem Request.valid_of_user (content : String) (rest : List ChatMessage)
+    (tools : List ToolFunction) :
+    Request.valid ⟨ChatMessage.text "user" content :: rest, tools⟩ :=
+  ⟨ChatMessage.text "user" content, .head _, by simp [ChatMessage.text]⟩
+
+theorem Request.valid_of_assistant (tc : Array Json) (rest : List ChatMessage)
+    (tools : List ToolFunction) :
+    Request.valid ⟨ChatMessage.withToolCalls tc :: rest, tools⟩ :=
+  ⟨ChatMessage.withToolCalls tc, .head _, by simp [ChatMessage.withToolCalls]⟩
+
 /-! ## API Calls -/
 
-/-- Call LLM API with messages and optional tools. -/
-def call (cfg : Config) (messages : List ChatMessage) (tools : List ToolFunction := [])
-    : IO String := do
-  let messagesJson := mkArr (messages.map ToJson.toJson)
+/-- Call LLM API with a request. -/
+def call (cfg : Config) (req : Request) : IO String := do
+  let messagesJson := mkArr (req.messages.map ToJson.toJson)
   let basePairs : List (String × Json) := [
     ("model", cfg.model),
     ("messages", messagesJson)
   ]
-  let pairs := if tools.isEmpty then basePairs
+  let pairs := if req.tools.isEmpty then basePairs
     else basePairs ++ [
-      ("tools", Json.arr (tools.map ToolFunction.toJson).toArray),
+      ("tools", Json.arr (req.tools.map ToolFunction.toJson).toArray),
       ("tool_choice", "auto")
     ]
   let body := mkObj pairs

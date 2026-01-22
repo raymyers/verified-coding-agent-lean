@@ -207,10 +207,10 @@ def runPromptMode (cfg : CLIConfig) : IO UInt32 := do
     model := cfg.model
     apiKey := cfg.apiKey
   }
-  let messages := [LLM.ChatMessage.text "user" cfg.task]
+  let request : LLM.Request := ⟨[LLM.ChatMessage.text "user" cfg.task], []⟩
   if cfg.verbose then
     IO.println "Calling LLM..."
-  let response ← LLM.call llmCfg messages
+  let response ← LLM.call llmCfg request
   if cfg.verbose then
     IO.println s!"Raw response: {response}"
     IO.println ""
@@ -237,7 +237,7 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
   ]
   IO.println s!"You: {cfg.task}"
   -- First response
-  let response ← LLM.call llmCfg messages
+  let response ← LLM.call llmCfg ⟨messages, []⟩
   let content ← match ← LLM.parseResponse response with
     | .content text => pure text
     | .toolCalls _ _ => pure "(unexpected tool call)"
@@ -252,7 +252,7 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
     if input.isEmpty || input == "quit" || input == "exit" then
       break
     messages := messages ++ [LLM.ChatMessage.text "user" input]
-    let response ← LLM.call llmCfg messages
+    let response ← LLM.call llmCfg ⟨messages, []⟩
     let content ← match ← LLM.parseResponse response with
       | .content text => pure text
       | .toolCalls _ _ => pure "(unexpected tool call)"
@@ -337,11 +337,11 @@ def traceToMessages (systemPrompt : String) (task : String)
       LLM.ChatMessage.toolResult tc.call.id tc.call.name observation ]
   [system, user] ++ history
 
-/-- traceToMessages always produces a valid message list (contains non-system message). -/
+/-- Any request built from traceToMessages is valid (contains non-system message). -/
 theorem traceToMessages_valid (systemPrompt task : String)
-    (trace : List (PendingToolCall × String)) :
-    LLM.validMessageList (traceToMessages systemPrompt task trace) := by
-  simp only [traceToMessages]
+    (trace : List (PendingToolCall × String)) (tools : List LLM.ToolFunction) :
+    LLM.Request.valid ⟨traceToMessages systemPrompt task trace, tools⟩ := by
+  simp only [traceToMessages, LLM.Request.valid]
   use LLM.ChatMessage.text "user" task
   simp [LLM.ChatMessage.text]
 
@@ -372,9 +372,10 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
       IO.println s!"[Step {stepCount}]"
     -- Build messages and call LLM (proven valid by traceToMessages_valid)
     let messages := traceToMessages systemPrompt cfg.task history
+    let request : LLM.Request := ⟨messages, agentTools⟩
     if cfg.verbose then
-      IO.println s!"  Calling LLM with {messages.length} messages..."
-    let response ← LLM.call llmCfg messages agentTools
+      IO.println s!"  Calling LLM with {request.messages.length} messages..."
+    let response ← LLM.call llmCfg request
     -- Parse response
     match ← LLM.parseResponse response with
     | .content text =>
