@@ -164,7 +164,8 @@ inductive Transition : State → State → Prop where
       Transition s {
         s with
         phase := .thinking,
-        trace := s.trace ++ [⟨"Received input", .requestInput prompt, userInput⟩]
+        trace := s.trace ++ [⟨"Received input", .requestInput prompt, userInput⟩],
+        stepCount := s.stepCount + 1
       }
 
 notation s " ⟶ " s' => Transition s s'

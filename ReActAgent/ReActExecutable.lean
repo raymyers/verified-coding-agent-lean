@@ -64,7 +64,8 @@ def stepWith (o : Oracles) (s : State) : Option State :=
       let input := o.user prompt
       some { s with
         phase := .thinking,
-        trace := s.trace ++ [⟨"Received input", .requestInput prompt, input⟩] }
+        trace := s.trace ++ [⟨"Received input", .requestInput prompt, input⟩],
+        stepCount := s.stepCount + 1 }
 
 /-! ## Soundness
 
@@ -138,11 +139,16 @@ theorem stepWith_trace_monotonic (o : Oracles) (s s' : State)
 Run the agent by repeatedly stepping until terminal or blocked.
 -/
 
-/-- Run the agent to completion, returning the final state. -/
-partial def runWith (o : Oracles) (s : State) : State :=
-  match stepWith o s with
-  | none => s
-  | some s' => runWith o s'
+/-- Run the agent to completion, returning the final state.
+    Uses explicit fuel to guarantee termination. The fuel should be set
+    high enough to cover all possible transitions (e.g., 2 * maxSteps). -/
+def runWith (o : Oracles) (s : State) (fuel : Nat := 1000) : State :=
+  match fuel with
+  | 0 => s  -- out of fuel, return current state
+  | fuel' + 1 =>
+    match stepWith o s with
+    | none => s
+    | some s' => runWith o s' fuel'
 
 /-! ## IO Wiring
 
@@ -189,13 +195,18 @@ def stepIO (o : IOOracles) (s : State) : IO (Option State) := do
       let input ← o.user prompt
       return some { s with
         phase := .thinking,
-        trace := s.trace ++ [⟨"Received input", .requestInput prompt, input⟩] }
+        trace := s.trace ++ [⟨"Received input", .requestInput prompt, input⟩],
+        stepCount := s.stepCount + 1 }
 
-/-- Run the agent to completion with IO. -/
-partial def runIO (o : IOOracles) (s : State) : IO State := do
-  match ← stepIO o s with
-  | none => return s
-  | some s' => runIO o s'
+/-- Run the agent to completion with IO.
+    Uses explicit fuel to guarantee termination. -/
+def runIO (o : IOOracles) (s : State) (fuel : Nat := 1000) : IO State := do
+  match fuel with
+  | 0 => return s  -- out of fuel
+  | fuel' + 1 =>
+    match ← stepIO o s with
+    | none => return s
+    | some s' => runIO o s' fuel'
 
 /-! ## Example: Mock Oracles for Testing -/
 
