@@ -177,6 +177,8 @@ def baseVocab : Vocab where
 theorem baseVocab_no_merges (pieces : List Piece)
     (h : ∀ p ∈ pieces, p.size = 1) :
     findMergeablePairs baseVocab pieces = [] := by
+  -- Key insight: concatenating two size-1 pieces gives size 2,
+  -- which baseVocab doesn't recognize
   sorry
 
 /-- With base vocab, encode just converts bytes to their numeric values -/
