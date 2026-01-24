@@ -229,11 +229,44 @@ theorem applyMerge_length (pieces : List Piece) (idx : Nat)
   have := applyMerge_go_length_aux 0 idx pieces (Nat.zero_le _) (by omega)
   omega
 
+/-- Helper: indices from go are bounded -/
+theorem findMergeablePairs_go_valid (vocab : Vocab) (i : Nat) (pieces : List Piece)
+    (idx : Nat) (rank : TokenId) (hmem : (idx, rank) ∈ findMergeablePairs.go vocab i pieces) :
+    i ≤ idx ∧ idx + 1 < i + pieces.length := by
+  induction pieces generalizing i with
+  | nil => simp [findMergeablePairs.go] at hmem
+  | cons a as ih =>
+    cases as with
+    | nil => simp [findMergeablePairs.go] at hmem
+    | cons b bs =>
+      simp only [findMergeablePairs.go] at hmem
+      cases hvocab : vocab.lookup (mergePieces a b) with
+      | none =>
+        simp [hvocab] at hmem
+        have ⟨hle, hlt⟩ := ih (i + 1) hmem
+        constructor
+        · omega
+        · simp only [List.length_cons] at hlt ⊢; omega
+      | some r =>
+        simp [hvocab] at hmem
+        rcases hmem with ⟨hidx, _⟩ | htail
+        · -- idx = i
+          constructor
+          · omega
+          · simp only [List.length_cons]; omega
+        · -- (idx, rank) ∈ go (i+1) (b :: bs)
+          have ⟨hle, hlt⟩ := ih (i + 1) htail
+          constructor
+          · omega
+          · simp only [List.length_cons] at hlt ⊢; omega
+
 /-- Indices returned by findMergeablePairs are valid -/
 theorem findMergeablePairs_valid_idx (vocab : Vocab) (pieces : List Piece)
     (idx : Nat) (rank : TokenId) (hmem : (idx, rank) ∈ findMergeablePairs vocab pieces) :
     idx + 1 < pieces.length := by
-  sorry
+  simp only [findMergeablePairs] at hmem
+  have ⟨_, hlt⟩ := findMergeablePairs_go_valid vocab 0 pieces idx rank hmem
+  omega
 
 /-- Each merge step reduces the number of pieces -/
 theorem mergeOnce_decreases (vocab : Vocab) (pieces pieces' : List Piece)
