@@ -123,6 +123,42 @@ theorem foldl_findBestMergeStep_some (x : Nat × TokenId) (xs : List (Nat × Tok
     simp only [hz]
     exact ih z
 
+/-- findBestMerge returns an element from the input list -/
+theorem findBestMerge_mem (candidates : List (Nat × TokenId)) (p : Nat × TokenId)
+    (h : findBestMerge candidates = some p) : p ∈ candidates := by
+  simp only [findBestMerge] at h
+  -- Prove by induction: foldl maintains that result ∈ accumulated list
+  suffices ∀ (acc : Option (Nat × TokenId)) (xs : List (Nat × TokenId)),
+      (∀ a, acc = some a → a ∈ candidates) →
+      (∀ x, x ∈ xs → x ∈ candidates) →
+      ∀ q, xs.foldl findBestMergeStep acc = some q → q ∈ candidates by
+    exact this none candidates (fun _ h => by simp at h) (fun x hx => hx) p h
+  intro acc xs hacc hxs q hq
+  induction xs generalizing acc with
+  | nil =>
+    simp only [List.foldl_nil] at hq
+    exact hacc q hq
+  | cons y ys ih =>
+    simp only [List.foldl_cons] at hq
+    apply ih (findBestMergeStep acc y)
+    · -- New accumulator value is in candidates
+      intro a ha
+      simp only [findBestMergeStep] at ha
+      cases acc with
+      | none =>
+        simp at ha
+        rw [← ha]
+        exact hxs y (by simp)
+      | some b =>
+        simp only at ha
+        split at ha
+        · simp at ha; rw [← ha]; exact hxs y (by simp)
+        · simp at ha; rw [← ha]; exact hacc b rfl
+    · -- Remaining list elements are in candidates
+      intro x hx
+      exact hxs x (List.mem_cons_of_mem y hx)
+    · exact hq
+
 /-- findBestMerge on non-empty list returns some -/
 theorem findBestMerge_cons (x : Nat × TokenId) (xs : List (Nat × TokenId)) :
     (findBestMerge (x :: xs)).isSome := by
@@ -213,9 +249,8 @@ theorem mergeOnce_decreases (vocab : Vocab) (pieces pieces' : List Piece)
     -- h : applyMerge pieces idx = pieces'
     rw [← h]
     -- Need: idx + 1 < pieces.length
-    have hmem : (idx, rank) ∈ findMergeablePairs vocab pieces := by
-      -- findBestMerge returns an element from the list
-      sorry
+    have hmem : (idx, rank) ∈ findMergeablePairs vocab pieces :=
+      findBestMerge_mem _ _ hbest
     have hvalid := findMergeablePairs_valid_idx vocab pieces idx rank hmem
     have hlen := applyMerge_length pieces idx hvalid
     -- hlen : (applyMerge pieces idx).length = pieces.length - 1
