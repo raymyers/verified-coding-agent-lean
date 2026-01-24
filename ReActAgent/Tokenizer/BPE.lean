@@ -150,17 +150,79 @@ theorem mergeOnce_none_iff (vocab : Vocab) (pieces : List Piece) :
     simp only [mergeOnce, h, findBestMerge, List.foldl_nil]
     rfl
 
+/-- Helper for applyMerge.go length -/
+theorem applyMerge_go_length_aux (i idx : Nat) (pieces : List Piece)
+    (hbound : i ≤ idx) (hvalid : idx + 1 < i + pieces.length) :
+    (applyMerge.go idx i pieces).length + 1 = pieces.length := by
+  induction pieces generalizing i with
+  | nil =>
+    -- hvalid : idx + 1 < i + 0, hbound : i ≤ idx
+    -- This is contradictory: idx + 1 < i and i ≤ idx
+    simp only [List.length_nil, Nat.add_zero] at hvalid
+    omega
+  | cons a as ih =>
+    cases as with
+    | nil =>
+      -- hvalid : idx + 1 < i + 1, hbound : i ≤ idx
+      -- So idx < i and i ≤ idx, contradiction
+      simp only [List.length_cons, List.length_nil] at hvalid
+      omega
+    | cons b bs =>
+      simp only [applyMerge.go]
+      split
+      · -- i == idx: merge happens here
+        simp only [List.length_cons]
+      · -- i ≠ idx: recurse
+        rename_i hne
+        simp only [beq_iff_eq] at hne
+        simp only [List.length_cons]
+        have hi : i < idx := Nat.lt_of_le_of_ne hbound (fun heq => hne heq)
+        have hbound' : i + 1 ≤ idx := hi
+        have hvalid' : idx + 1 < (i + 1) + (b :: bs).length := by
+          simp only [List.length_cons] at hvalid ⊢
+          omega
+        have := ih (i + 1) hbound' hvalid'
+        simp only [List.length_cons] at this
+        omega
+
 /-- applyMerge reduces length by 1 -/
 theorem applyMerge_length (pieces : List Piece) (idx : Nat)
     (h : idx + 1 < pieces.length) :
     (applyMerge pieces idx).length = pieces.length - 1 := by
+  simp only [applyMerge]
+  have := applyMerge_go_length_aux 0 idx pieces (Nat.zero_le _) (by omega)
+  omega
+
+/-- Indices returned by findMergeablePairs are valid -/
+theorem findMergeablePairs_valid_idx (vocab : Vocab) (pieces : List Piece)
+    (idx : Nat) (rank : TokenId) (hmem : (idx, rank) ∈ findMergeablePairs vocab pieces) :
+    idx + 1 < pieces.length := by
   sorry
 
 /-- Each merge step reduces the number of pieces -/
 theorem mergeOnce_decreases (vocab : Vocab) (pieces pieces' : List Piece)
     (h : mergeOnce vocab pieces = some pieces') :
     pieces'.length < pieces.length := by
-  sorry
+  simp only [mergeOnce] at h
+  -- Extract the index from findBestMerge
+  cases hbest : findBestMerge (findMergeablePairs vocab pieces) with
+  | none => simp [hbest] at h
+  | some p =>
+    simp [hbest] at h
+    obtain ⟨idx, rank⟩ := p
+    -- h : applyMerge pieces idx = pieces'
+    rw [← h]
+    -- Need: idx + 1 < pieces.length
+    have hmem : (idx, rank) ∈ findMergeablePairs vocab pieces := by
+      -- findBestMerge returns an element from the list
+      sorry
+    have hvalid := findMergeablePairs_valid_idx vocab pieces idx rank hmem
+    have hlen := applyMerge_length pieces idx hvalid
+    -- hlen : (applyMerge pieces idx).length = pieces.length - 1
+    -- hvalid : idx + 1 < pieces.length, so pieces.length ≥ 2
+    have hge2 : pieces.length ≥ 2 := by omega
+    rw [hlen]
+    omega
 
 /-! ## Test Vocabulary: Base bytes only -/
 
