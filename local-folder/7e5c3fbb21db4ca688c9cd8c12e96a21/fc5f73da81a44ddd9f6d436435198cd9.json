@@ -1,0 +1,35 @@
+{
+  "id": "fc5f73da-81a4-4ddd-9f6d-436435198cd9",
+  "timestamp": "2026-01-17T02:53:25.010334",
+  "source": "environment",
+  "tool_name": "terminal",
+  "tool_call_id": "toolu_016PjCh93AbnMRgqgc893JLm",
+  "observation": {
+    "content": [
+      {
+        "cache_prompt": false,
+        "type": "text",
+        "text": "cd /workspace/project/tb-difficulty-tuner && export WANDB_API_KEY=\"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\" && export PINECONE_API_KEY=\"pcsk_3Vsf8s_UoX9xAA4AzvCu6kJFoAYxMs33WKzL3VdtgMpK2tSQUodh3oVBM62BnSZn22Zgzr\" && python3 << 'EOF'\nimport os\nfrom pinecone import Pinecone\npc = Pinecone(api_key=os.environ[\"PINECONE_API_KEY\"])\n# List all indexes\nprint(\"=== Pinecone Indexes ===\")\nindexes = pc.list_indexes()\nfor idx in indexes:\n    print(f\"  - {idx.name} (host: {idx.host})\")\n# Connect to each index and get stats\nfor idx_info in indexes:\n    print(f\"\\n=== Index: {idx_info.name} ===\")\n    index = pc.Index(idx_info.name)\n    stats = index.describe_index_stats()\n    print(f\"  Total vectors: {stats.total_vector_count}\")\n    print(f\"  Namespaces: {list(stats.namespaces.keys()) if stats.namespaces else 'default only'}\")\n\n    # Sample some vectors to see metadata structure\n    print(f\"\\n  Sampling vectors...\")\n    # Query with a random vector to get some results\n    import random\n    dim = stats.dimension if hasattr(stats, 'dimension') else 1536\n    results = index.query(\n        vector=[random.random() for _ in range(dim)],\n        top_k=3,\n        include_metadata=True\n    )\n    if results.matches:\n        print(f\"  Sample metadata keys: {list(results.matches[0].metadata.keys()) if results.matches[0].metadata else 'none'}\")\n        for i, match in enumerate(results.matches[:2]):\n            print(f\"\\n  Sample {i+1} (id: {match.id[:50]}...):\")\n            if match.metadata:\n                for k, v in list(match.metadata.items())[:8]:\n                    val_str = str(v)[:100] + \"...\" if len(str(v)) > 100 else str(v)\n                    print(f\"    {k}: {val_str}\")\nEOF\n=== Pinecone Indexes ===\n  - tb-agent-benchmark (host: tb-agent-benchmark-5d0xv42.svc.aped-4627-b74a.pinecone.io)\n  - agent-task-benchmark (host: agent-task-benchmark-5d0xv42.svc.aped-4627-b74a.pinecone.io)\n\n=== Index: tb-agent-benchmark ===\n  Total vectors: 441\n  Namespaces: ['snapshots', 'trials']\n\n  Sampling vectors...\n\n=== Index: agent-task-benchmark ===\n  Total vectors: 670\n  Namespaces: ['steps', 'trials']\n\n  Sampling vectors...",
+        "enable_truncation": true
+      }
+    ],
+    "is_error": false,
+    "command": "cd /workspace/project/tb-difficulty-tuner && export WANDB_API_KEY=\"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\" && export PINECONE_API_KEY=\"pcsk_3Vsf8s_UoX9xAA4AzvCu6kJFoAYxMs33WKzL3VdtgMpK2tSQUodh3oVBM62BnSZn22Zgzr\" && python3 << 'EOF'\nimport os\nfrom pinecone import Pinecone\n\npc = Pinecone(api_key=os.environ[\"PINECONE_API_KEY\"])\n\n# List all indexes\nprint(\"=== Pinecone Indexes ===\")\nindexes = pc.list_indexes()\nfor idx in indexes:\n    print(f\"  - {idx.name} (host: {idx.host})\")\n\n# Connect to each index and get stats\nfor idx_info in indexes:\n    print(f\"\\n=== Index: {idx_info.name} ===\")\n    index = pc.Index(idx_info.name)\n    stats = index.describe_index_stats()\n    print(f\"  Total vectors: {stats.total_vector_count}\")\n    print(f\"  Namespaces: {list(stats.namespaces.keys()) if stats.namespaces else 'default only'}\")\n    \n    # Sample some vectors to see metadata structure\n    print(f\"\\n  Sampling vectors...\")\n    # Query with a random vector to get some results\n    import random\n    dim = stats.dimension if hasattr(stats, 'dimension') else 1536\n    results = index.query(\n        vector=[random.random() for _ in range(dim)],\n        top_k=3,\n        include_metadata=True\n    )\n    if results.matches:\n        print(f\"  Sample metadata keys: {list(results.matches[0].metadata.keys()) if results.matches[0].metadata else 'none'}\")\n        for i, match in enumerate(results.matches[:2]):\n            print(f\"\\n  Sample {i+1} (id: {match.id[:50]}...):\")\n            if match.metadata:\n                for k, v in list(match.metadata.items())[:8]:\n                    val_str = str(v)[:100] + \"...\" if len(str(v)) > 100 else str(v)\n                    print(f\"    {k}: {val_str}\")\nEOF",
+    "exit_code": 0,
+    "timeout": false,
+    "metadata": {
+      "exit_code": 0,
+      "pid": -1,
+      "username": "openhands",
+      "hostname": "runtime-ljinmzjtixfsjbga-5c968d7564-8fgqg",
+      "working_dir": "/workspace/project/tb-difficulty-tuner",
+      "py_interpreter_path": "/usr/local/bin/python",
+      "prefix": "",
+      "suffix": "\n[The command completed with exit code 0.]"
+    },
+    "full_output_save_dir": "/workspace/conversations/7e5c3fbb21db4ca688c9cd8c12e96a21/observations",
+    "kind": "TerminalObservation"
+  },
+  "action_id": "ea592913-cd25-4aa0-aaad-d7ae60713741",
+  "kind": "ObservationEvent"
+}

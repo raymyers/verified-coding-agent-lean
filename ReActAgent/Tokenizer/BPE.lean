@@ -97,15 +97,58 @@ def decode (vocab : Vocab) (tokens : List TokenId) : Option ByteArray :=
 
 /-! ## Properties -/
 
+/-- The step function in findBestMerge preserves Some -/
+private def findBestMergeStep (best : Option (Nat × TokenId)) (curr : Nat × TokenId) :
+    Option (Nat × TokenId) :=
+  match best with
+  | none => some curr
+  | some (_, bestRank) => if curr.2 < bestRank then some curr else best
+
+/-- Once we have Some, findBestMergeStep keeps it Some -/
+theorem findBestMergeStep_preserves_some (x : Nat × TokenId) (curr : Nat × TokenId) :
+    ∃ z, findBestMergeStep (some x) curr = some z := by
+  simp only [findBestMergeStep]
+  split
+  · exact ⟨curr, rfl⟩
+  · exact ⟨x, rfl⟩
+
+/-- foldl with findBestMergeStep starting from Some stays Some -/
+theorem foldl_findBestMergeStep_some (x : Nat × TokenId) (xs : List (Nat × TokenId)) :
+    (xs.foldl findBestMergeStep (some x)).isSome := by
+  induction xs generalizing x with
+  | nil => simp [Option.isSome]
+  | cons y ys ih =>
+    simp only [List.foldl_cons]
+    obtain ⟨z, hz⟩ := findBestMergeStep_preserves_some x y
+    simp only [hz]
+    exact ih z
+
 /-- findBestMerge on non-empty list returns some -/
 theorem findBestMerge_cons (x : Nat × TokenId) (xs : List (Nat × TokenId)) :
     (findBestMerge (x :: xs)).isSome := by
-  sorry
+  simp only [findBestMerge, List.foldl_cons]
+  -- First step goes from none to some x
+  show (xs.foldl _ (some x)).isSome
+  exact foldl_findBestMergeStep_some x xs
 
 /-- mergeOnce returns none iff no mergeable pairs exist -/
 theorem mergeOnce_none_iff (vocab : Vocab) (pieces : List Piece) :
     mergeOnce vocab pieces = none ↔ findMergeablePairs vocab pieces = [] := by
-  sorry
+  constructor
+  · -- If mergeOnce returns none, candidates must be empty
+    intro h
+    cases hcands : findMergeablePairs vocab pieces with
+    | nil => rfl
+    | cons y ys =>
+      have hsome := findBestMerge_cons y ys
+      simp only [mergeOnce, hcands] at h
+      simp only [Option.isSome_iff_exists] at hsome
+      obtain ⟨v, hv⟩ := hsome
+      simp [hv] at h
+  · -- If candidates empty, mergeOnce returns none
+    intro h
+    simp only [mergeOnce, h, findBestMerge, List.foldl_nil]
+    rfl
 
 /-- applyMerge reduces length by 1 -/
 theorem applyMerge_length (pieces : List Piece) (idx : Nat)

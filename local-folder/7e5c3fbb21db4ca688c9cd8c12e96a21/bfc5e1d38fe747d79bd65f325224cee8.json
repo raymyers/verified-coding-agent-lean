@@ -1,0 +1,32 @@
+{
+  "id": "bfc5e1d3-8fe7-47d7-9bd6-5f325224cee8",
+  "timestamp": "2026-01-17T03:19:22.831083",
+  "source": "user",
+  "llm_message": {
+    "role": "user",
+    "content": [
+      {
+        "cache_prompt": false,
+        "type": "text",
+        "text": "go for it! if any have errors, skip them for now",
+        "enable_truncation": true
+      }
+    ],
+    "cache_enabled": false,
+    "vision_enabled": false,
+    "function_calling_enabled": false,
+    "tool_calls": null,
+    "tool_call_id": null,
+    "name": null,
+    "force_string_serializer": false,
+    "send_reasoning_content": false,
+    "reasoning_content": null,
+    "thinking_blocks": [],
+    "responses_reasoning_item": null
+  },
+  "llm_response_id": null,
+  "activated_skills": [],
+  "extended_content": [],
+  "sender": null,
+  "kind": "MessageEvent"
+}

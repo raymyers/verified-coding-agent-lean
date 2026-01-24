@@ -1,0 +1,32 @@
+{
+  "id": "eb878802-0dd8-463c-88ac-17b53a43d6e2",
+  "timestamp": "2026-01-17T03:17:34.862610",
+  "source": "user",
+  "llm_message": {
+    "role": "user",
+    "content": [
+      {
+        "cache_prompt": false,
+        "type": "text",
+        "text": "ok great. what do you need next, i can move some new tasks into this reo",
+        "enable_truncation": true
+      }
+    ],
+    "cache_enabled": false,
+    "vision_enabled": false,
+    "function_calling_enabled": false,
+    "tool_calls": null,
+    "tool_call_id": null,
+    "name": null,
+    "force_string_serializer": false,
+    "send_reasoning_content": false,
+    "reasoning_content": null,
+    "thinking_blocks": [],
+    "responses_reasoning_item": null
+  },
+  "llm_response_id": null,
+  "activated_skills": [],
+  "extended_content": [],
+  "sender": null,
+  "kind": "MessageEvent"
+}

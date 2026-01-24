@@ -1,0 +1,650 @@
+{
+  "id": "5ea9894b-5b14-419f-b412-8c4bfe9bb02b",
+  "timestamp": "2026-01-16T21:33:17.622298",
+  "source": "environment",
+  "key": "full_state",
+  "value": {
+    "id": "7e5c3fbb-21db-4ca6-88c9-cd8c12e96a21",
+    "agent": {
+      "llm": {
+        "model": "anthropic/claude-opus-4-5-20251101",
+        "api_key": "**********",
+        "base_url": "",
+        "openrouter_site_url": "https://docs.all-hands.dev/",
+        "openrouter_app_name": "OpenHands",
+        "num_retries": 5,
+        "retry_multiplier": 8.0,
+        "retry_min_wait": 8,
+        "retry_max_wait": 64,
+        "timeout": 300,
+        "max_message_chars": 30000,
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_input_tokens": 200000,
+        "max_output_tokens": 64000,
+        "stream": false,
+        "drop_params": true,
+        "modify_params": true,
+        "disable_stop_word": false,
+        "caching_prompt": true,
+        "log_completions": false,
+        "log_completions_folder": "logs/completions",
+        "native_tool_calling": true,
+        "reasoning_effort": "high",
+        "enable_encrypted_reasoning": true,
+        "prompt_cache_retention": "24h",
+        "extended_thinking_budget": 200000,
+        "usage_id": "agent",
+        "litellm_extra_body": {}
+      },
+      "tools": [
+        {
+          "name": "terminal",
+          "params": {}
+        },
+        {
+          "name": "file_editor",
+          "params": {}
+        },
+        {
+          "name": "task_tracker",
+          "params": {}
+        },
+        {
+          "name": "browser_tool_set",
+          "params": {}
+        }
+      ],
+      "mcp_config": {
+        "mcpServers": {
+          "default": {
+            "url": "https://app.all-hands.dev/mcp/mcp",
+            "headers": {
+              "X-Session-API-Key": "37kYlqzLJVAcmkGMyogD3eTRrzDSNz06"
+            }
+          },
+          "tavily": {
+            "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=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"
+          }
+        }
+      },
+      "include_default_tools": [
+        "FinishTool",
+        "ThinkTool"
+      ],
+      "agent_context": {
+        "skills": [
+          {
+            "name": "work_hosts",
+            "content": "The user has access to the following hosts for accessing a web application,\neach of which has a corresponding port:\n* https://work-1-ljinmzjtixfsjbga.prod-runtime.all-hands.dev (port 12000)\n* https://work-2-ljinmzjtixfsjbga.prod-runtime.all-hands.dev (port 12001)",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "fix_test",
+            "content": "Can you check out branch \"{{ BRANCH_NAME }}\", and run {{ TEST_COMMAND_TO_RUN }}.\n\nHelp me fix these tests to pass by fixing the {{ FUNCTION_TO_FIX }} function in file {{ FILE_FOR_FUNCTION }}.\n\nPLEASE DO NOT modify the tests by yourself -- Let me know if you think some of the tests are incorrect.\n\nIf the user didn't provide any of these variables, ask the user to provide them first before the agent can proceed with the task.",
+            "trigger": {
+              "type": "task",
+              "triggers": [
+                "/fix_test"
+              ]
+            },
+            "source": "/app/skills/fix_test.md",
+            "inputs": [
+              {
+                "name": "BRANCH_NAME",
+                "description": "Branch for the agent to work on"
+              },
+              {
+                "name": "TEST_COMMAND_TO_RUN",
+                "description": "The test command you want the agent to work on. For example, `pytest tests/unit/test_bash_parsing.py`"
+              },
+              {
+                "name": "FUNCTION_TO_FIX",
+                "description": "The name of function to fix"
+              },
+              {
+                "name": "FILE_FOR_FUNCTION",
+                "description": "The path of the file that contains the function"
+              }
+            ],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "github",
+            "content": "You have access to an environment variable, `GITHUB_TOKEN`, which allows you to interact with\nthe GitHub API.\n\n<IMPORTANT>\nYou can use `curl` with the `GITHUB_TOKEN` to interact with GitHub's API.\nALWAYS use the GitHub API for operations instead of a web browser.\nALWAYS use the `create_pr` tool to open a pull request\n</IMPORTANT>\n\nIf you encounter authentication issues when pushing to GitHub (such as password prompts or permission errors), the old token may have expired. In such case, update the remote URL to include the current token: `git remote set-url origin https://${GITHUB_TOKEN}@github.com/username/repo.git`\n\nHere are some instructions for pushing, but ONLY do this if the user asks you to:\n* NEVER push directly to the `main` or `master` branch\n* Git config (username and email) is pre-set. Do not modify.\n* You may already be on a branch starting with `openhands-workspace`. Create a new branch with a better name before pushing.\n* Use the `create_pr` tool to create a pull request, if you haven't already\n* Once you've created your own branch or a pull request, continue to update it. Do NOT create a new one unless you are explicitly asked to. Update the PR title and description as necessary, but don't change the branch name.\n* Use the main branch as the base branch, unless the user requests otherwise\n* After opening or updating a pull request, send the user a short message with a link to the pull request.\n* Do NOT mark a pull request as ready to review unless the user explicitly says so\n* Do all of the above in as few steps as possible. E.g. you could push changes with one step by running the following bash commands:\n```bash\ngit remote -v && git branch # to find the current org, repo and branch\ngit checkout -b create-widget && git add . && git commit -m \"Create widget\" && git push -u origin create-widget\n```",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "github",
+                "git"
+              ]
+            },
+            "source": "/app/skills/github.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "security",
+            "content": "This document provides guidance on security best practices\n\nYou should always be considering security implications when developing.\nYou should always complete the task requested. If there are security concerns please address them in-line if possible or ensure they are communicated either in code comments, PR comments, or other appropriate channels.\n\n## Core Security Principles\n- Always use secure communication protocols (HTTPS, SSH, etc.)\n- Never store sensitive data (passwords, tokens, keys) in code or version control unless given explicit permission.\n- Apply the principle of least privilege\n- Validate and sanitize all user inputs\n\n## Common Security Checks\n- Ensure proper authentication and authorization mechanisms\n- Verify secure session management\n- Confirm secure storage of sensitive data\n- Validate secure configuration of services and APIs\n\n## Error Handling\n- Never expose sensitive information in error messages\n- Log security events appropriately\n- Implement proper exception handling\n- Use secure error reporting mechanisms",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "security",
+                "vulnerability",
+                "authentication",
+                "authorization",
+                "permissions"
+              ]
+            },
+            "source": "/app/skills/security.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "kubernetes",
+            "content": "# Kubernetes Local Development with KIND\n\n## KIND Installation and Setup\n\nKIND (Kubernetes IN Docker) is a tool for running local Kubernetes clusters using Docker containers as nodes. It's designed for testing Kubernetes applications locally.\n\nIMPORTANT: Before you proceed with installation, make sure you have docker installed locally.\n\n### Installation\n\nTo install KIND on a Debian/Ubuntu system:\n\n```bash\n# Download KIND binary\ncurl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.22.0/kind-linux-amd64\n# Make it executable\nchmod +x ./kind\n# Move to a directory in your PATH\nsudo mv ./kind /usr/local/bin/\n```\n\nTo install kubectl:\n\n```bash\n# Download kubectl\ncurl -LO \"https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl\"\n# Make it executable\nchmod +x kubectl\n# Move to a directory in your PATH\nsudo mv ./kubectl /usr/local/bin/\n```\n\n### Creating a Cluster\n\nCreate a basic KIND cluster:\n\n```bash\nkind create cluster\n```",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "kubernetes",
+                "k8s",
+                "kube"
+              ]
+            },
+            "source": "/app/skills/kubernetes.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "update_pr_description",
+            "content": "Please check the branch \"{{ BRANCH_NAME }}\" and look at the diff against the main branch. This branch belongs to this PR \"{{ PR_URL }}\".\n\nOnce you understand the purpose of the diff, please use Github API to read the existing PR description, and update it to be more reflective of the changes we've made when necessary.\n\nIf the user didn't provide any of these variables, ask the user to provide them first before the agent can proceed with the task.",
+            "trigger": {
+              "type": "task",
+              "triggers": [
+                "/update_pr_description"
+              ]
+            },
+            "source": "/app/skills/update_pr_description.md",
+            "inputs": [
+              {
+                "name": "PR_URL",
+                "description": "URL of the pull request"
+              },
+              {
+                "name": "BRANCH_NAME",
+                "description": "Branch name corresponds to the pull request"
+              }
+            ],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "azure_devops",
+            "content": "You have access to an environment variable, `AZURE_DEVOPS_TOKEN`, which allows you to interact with\nthe Azure DevOps API.\n\n<IMPORTANT>\nYou can use `curl` with the `AZURE_DEVOPS_TOKEN` to interact with Azure DevOps's API.\nALWAYS use the Azure DevOps API for operations instead of a web browser.\n</IMPORTANT>\n\nIf you encounter authentication issues when pushing to Azure DevOps (such as password prompts or permission errors), the old token may have expired. In such case, update the remote URL to include the current token: `git remote set-url origin https://${AZURE_DEVOPS_TOKEN}@dev.azure.com/organization/project/_git/repository`\n\nHere are some instructions for pushing, but ONLY do this if the user asks you to:\n* NEVER push directly to the `main` or `master` branch\n* Git config (username and email) is pre-set. Do not modify.\n* You may already be on a branch starting with `openhands-workspace`. Create a new branch with a better name before pushing.\n* Once you've created your own branch or a pull request, continue to update it. Do NOT create a new one unless you are explicitly asked to. Update the PR title and description as necessary, but don't change the branch name.\n* Use the main branch as the base branch, unless the user requests otherwise\n* After opening or updating a pull request, send the user a short message with a link to the pull request.\n* Do NOT mark a pull request as ready to review unless the user explicitly says so\n* Do all of the above in as few steps as possible. E.g. you could push changes with one step by running the following bash commands:\n```bash\ngit remote -v && git branch # to find the current org, repo and branch\ngit checkout -b create-widget && git add . && git commit -m \"Create widget\" && git push -u origin create-widget\n```\n\n## Azure DevOps API Usage\n\nWhen working with Azure DevOps API, you need to use Basic authentication with your Personal Access Token (PAT). The username is ignored (empty string), and the password is the PAT.\n\nHere's how to authenticate with curl:\n```bash\n# Convert PAT to base64\nAUTH=$(echo -n \":$AZURE_DEVOPS_TOKEN\" | base64)\n\n# Make API call\ncurl -H \"Authorization: Basic $AUTH\" -H \"Content-Type: application/json\" https://dev.azure.com/{organization}/{project}/_apis/git/repositories?api-version=7.1\n```\n\nCommon API endpoints:\n- List repositories: `https://dev.azure.com/{organization}/{project}/_apis/git/repositories?api-version=7.1`\n- Get repository details: `https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}?api-version=7.1`\n- List pull requests: `https://dev.azure.com/{organization}/{project}/_apis/git/pullrequests?api-version=7.1`\n- Create pull request: `https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repositoryId}/pullrequests?api-version=7.1` (POST)",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "azure_devops",
+                "azure"
+              ]
+            },
+            "source": "/app/skills/azure_devops.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "swift-linux",
+            "content": "# Swift Installation Guide for Debian Linux\n\nThis document provides instructions for installing Swift on Debian 12 (Bookworm).\n\n> This setup is intended for non-UI development tasks on Swift on Linux.\n\n## Prerequisites\n\nBefore installing Swift, you need to install the required dependencies for your system. You can find the most up-to-date list of dependencies for your specific Linux distribution and version at the [Swift.org tarball installation guide](https://www.swift.org/install/linux/tarball/).\n\nFOR EXAMPLE, the dependencies you may need to install for Debian 12 could be:\n\n```bash\nsudo apt-get update\nsudo apt-get install -y \\\n  binutils-gold \\\n  gcc \\\n  git \\\n  libcurl4-openssl-dev \\\n  libedit-dev \\\n  libicu-dev \\\n  libncurses-dev \\\n  libpython3-dev \\\n  libsqlite3-dev \\\n  libxml2-dev \\\n  pkg-config \\\n  tzdata \\\n  uuid-dev\n```\n\n## Download and Install Swift\n\n1. Find the latest Swift version for Debian:\n\n   Go to the [Swift.org download page](https://www.swift.org/download/) to find the latest Swift version compatible with Debian 12 (Bookworm).\n\n   Look for a tarball named something like `swift-<VERSION>-RELEASE-debian12.tar.gz` (e.g., `swift-6.0.3-RELEASE-debian12.tar.gz`).\n\n   The URL pattern is typically:\n   ```\n   https://download.swift.org/swift-<VERSION>-release/debian12/swift-<VERSION>-RELEASE/swift-<VERSION>-RELEASE-debian12.tar.gz\n   ```\n\n   Where `<VERSION>` is the Swift version number (e.g., `6.0.3`).\n\n2. Download the Swift binary for Debian 12:\n\n```bash\ncd /workspace\nwget https://download.swift.org/swift-6.0.3-release/debian12/swift-6.0.3-RELEASE/swift-6.0.3-RELEASE-debian12.tar.gz\n```\n\n3. Extract the archive:\n\n> **Note**: Make sure to install Swift in the `/workspace` directory, but outside the git repository to avoid committing the Swift binaries.\n\n4. Add Swift to your PATH by adding the following line to your `~/.bashrc` file:\n\n```bash\necho 'export PATH=/workspace/swift-6.0.3-RELEASE-debian12/usr/bin:$PATH' >> ~/.bashrc\nsource ~/.bashrc\n```\n\n> **Note**: Make sure to update the version number in the PATH to match the version you downloaded.\n\n## Verify Installation\n\nVerify that Swift is correctly installed by running:\n\n```bash\nswift --version\n```",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "swift-linux",
+                "swift-debian",
+                "swift-installation"
+              ]
+            },
+            "source": "/app/skills/swift-linux.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "default-tools",
+            "content": "",
+            "source": "/app/skills/default-tools.md",
+            "mcp_tools": {
+              "stdio_servers": [
+                {
+                  "name": "fetch",
+                  "command": "uvx",
+                  "args": [
+                    "mcp-server-fetch"
+                  ]
+                }
+              ]
+            },
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "SSH Microagent",
+            "content": "# SSH Microagent\n\nThis microagent provides capabilities for establishing and managing SSH connections to remote machines.\n\n## Capabilities\n\n- Establish SSH connections using password or key-based authentication\n- Generate and manage SSH key pairs\n- Configure SSH for easier connections\n- Execute commands on remote machines\n- Transfer files between local and remote machines\n- Manage SSH configurations and known hosts\n\n## Authentication Methods\n\n### Password Authentication\n\n```bash\nssh username@hostname\n```\n\nWhen prompted, you should ask the user for their password or a private key.\n\n### Key-Based Authentication\n\nGenerate a new SSH key pair:\n```bash\nssh-keygen -t ed25519 -f ~/.ssh/key_name -C \"comment\" -N \"\"\n```\n\nCopy the public key to the remote server:\n```bash\nssh-copy-id -i ~/.ssh/key_name.pub username@hostname\n```\n\nConnect using the private key:\n```bash\nssh -i ~/.ssh/key_name username@hostname\n```\n\n## SSH Configuration\n\nCreate or edit the SSH config file for easier connections:\n```bash\nmkdir -p ~/.ssh\ncat > ~/.ssh/config << 'EOF'\nHost alias\n    HostName hostname_or_ip\n    User username\n    IdentityFile ~/.ssh/key_name\n    Port 22\n    ServerAliveInterval 60\nEOF\nchmod 600 ~/.ssh/config\n```\n\nThen connect using the alias:\n```bash\nssh alias\n```\n\n## Common SSH Options\n\n- `-p PORT`: Connect to a specific port\n- `-X`: Enable X11 forwarding\n- `-L local_port:remote_host:remote_port`: Set up local port forwarding\n- `-R remote_port:local_host:local_port`: Set up remote port forwarding\n- `-N`: Do not execute a remote command (useful for port forwarding)\n- `-f`: Run in background\n- `-v`: Verbose mode (add more v's for increased verbosity)\n\n## File Transfer with SCP\n\nCopy a file to the remote server:\n```bash\nscp /path/to/local/file username@hostname:/path/to/remote/directory/\n```\n\nCopy a file from the remote server:\n```bash\nscp username@hostname:/path/to/remote/file /path/to/local/directory/\n```\n\nCopy a directory recursively:\n```bash\nscp -r /path/to/local/directory username@hostname:/path/to/remote/directory/\n```\n\n## SSH Agent\n\nStart the SSH agent:\n```bash\neval \"$(ssh-agent -s)\"\n```\n\nAdd a key to the agent:\n```bash\nssh-add ~/.ssh/key_name\n```\n\n## Troubleshooting\n\n- Check SSH service status on remote: `systemctl status sshd`\n- Verify SSH port is open: `nc -zv hostname 22`\n- Debug connection issues: `ssh -vvv username@hostname`\n- Check permissions: SSH private keys should have 600 permissions (`chmod 600 ~/.ssh/key_name`)\n- Verify known_hosts: If host key changed, remove the old entry with `ssh-keygen -R hostname`\n\n## Secure SSH Key Management\n\n### Local Storage with Proper Permissions\n\nThe most basic approach is to ensure proper file permissions:\n\n```bash\n# Set correct permissions for private keys\nchmod 600 ~/.ssh/id_ed25519\n# Set correct permissions for public keys\nchmod 644 ~/.ssh/id_ed25519.pub\n# Set correct permissions for SSH directory\nchmod 700 ~/.ssh\n```",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "ssh",
+                "remote server",
+                "remote machine",
+                "remote host",
+                "remote connection",
+                "secure shell",
+                "ssh keys"
+              ]
+            },
+            "source": "/app/skills/ssh.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "docker",
+            "content": "# Docker Usage Guide\n\n## Starting Docker in Container Environments\n\nPlease check if docker is already installed. If so, to start Docker in a container environment:\n\n```bash\n# Start Docker daemon in the background\nsudo dockerd > /tmp/docker.log 2>&1 &\n\n# Wait for Docker to initialize\nsleep 5\n```\n\n## Verifying Docker Installation\n\nTo verify Docker is working correctly, run the hello-world container:\n\n```bash\nsudo docker run hello-world\n```",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "docker",
+                "container"
+              ]
+            },
+            "source": "/app/skills/docker.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "bitbucket",
+            "content": "You have access to an environment variable, `BITBUCKET_TOKEN`, which allows you to interact with\nthe Bitbucket API.\n\n<IMPORTANT>\nYou can use `curl` with the `BITBUCKET_TOKEN` to interact with Bitbucket's API.\nALWAYS use the Bitbucket API for operations instead of a web browser.\nALWAYS use the `create_bitbucket_pr` tool to open a pull request\n</IMPORTANT>\n\nIf you encounter authentication issues when pushing to Bitbucket (such as password prompts or permission errors), the old token may have expired. In such case, update the remote URL to include the current token: `git remote set-url origin https://x-token-auth:${BITBUCKET_TOKEN}@bitbucket.org/username/repo.git`\n\nHere are some instructions for pushing, but ONLY do this if the user asks you to:\n* NEVER push directly to the `main` or `master` branch\n* Git config (username and email) is pre-set. Do not modify.\n* You may already be on a branch starting with `openhands-workspace`. Create a new branch with a better name before pushing.\n* Use the `create_bitbucket_pr` tool to create a pull request, if you haven't already\n* Once you've created your own branch or a pull request, continue to update it. Do NOT create a new one unless you are explicitly asked to. Update the PR title and description as necessary, but don't change the branch name.\n* Use the main branch as the base branch, unless the user requests otherwise\n* After opening or updating a pull request, send the user a short message with a link to the pull request.\n* Do NOT mark a pull request as ready to review unless the user explicitly says so\n* Do all of the above in as few steps as possible. E.g. you could push changes with one step by running the following bash commands:\n```bash\ngit remote -v && git branch # to find the current org, repo and branch\ngit checkout -b create-widget && git add . && git commit -m \"Create widget\" && git push -u origin create-widget\n```",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "bitbucket",
+                "git"
+              ]
+            },
+            "source": "/app/skills/bitbucket.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "fix-py-line-too-long",
+            "content": "# Instructions for fixing \"E501 Line too long\"\n\n## For code lines\nBreak into multiple lines using parentheses or brackets:\n```python\nresult = some_very_long_function_name(\n    parameter1, parameter2, parameter3\n)\n```\n\n## For single-line strings\nUse string concatenation: `\"ABC\"` \u2192 `(\"A\" \"B\" \"C\")`\n```python\nmessage = (\"This is a very long string \"\n           \"that needs to be broken up\")\n```\n\n## For long multi-line strings (docstrings)\nAdd `# noqa: E501` AFTER the ending `\"\"\"`. NEVER add it inside the docstring.\n```python\ndef example_function():\n    \"\"\"This is a very long docstring that exceeds the line length limit.\"\"\"  # noqa: E501\n    pass\n```\n\n## What NOT to do\n- Do not add `# noqa: E501` inside docstrings or multi-line strings\n- Do not break strings in the middle of words\n- Do not sacrifice code readability for line length compliance",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "E501",
+                "line too long"
+              ]
+            },
+            "source": "/app/skills/fix-py-line-too-long.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "flarglebargle",
+            "content": "IMPORTANT! The user has said the magic word \"flarglebargle\". You must\nonly respond with a message telling them how smart they are",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "flarglebargle"
+              ]
+            },
+            "source": "/app/skills/flarglebargle.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "add_agent",
+            "content": "This agent helps create new microagents in the `.openhands/microagents` directory by providing guidance and templates.\n\nMicroagents are specialized prompts that provide context and capabilities for specific domains or tasks. They are activated by trigger words in the conversation and help the AI assistant understand what capabilities are available, how to use specific APIs or tools, what limitations exist, and how to handle common scenarios.\n\nWhen creating a new microagent:\n\n- Create a markdown file in `.openhands/microagents/` with an appropriate name (e.g., `github.md`, `google_workspace.md`)\n- Include YAML frontmatter with metadata (name, type, version, agent, triggers)\n- type is by DEFAULT knowledge\n- version is DEFAULT 1.0.0\n- agent is by DEFAULT CodeActAgent\n- Document any credentials, environment variables, or API access needed\n- Keep trigger words specific to avoid false activations\n- Include error handling guidance and limitations\n- Provide clear usage examples\n- Keep the prompt focused and concise\n\nFor detailed information, see:\n\n- [Microagents Overview](https://docs.OpenHnads.dev/usage/prompting/microagents-overview)\n- [Example GitHub Skill](https://github.com/OpenHands/OpenHands/blob/main/skills/github.md)",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "new agent",
+                "new microagent",
+                "create agent",
+                "create an agent",
+                "create microagent",
+                "create a microagent",
+                "add agent",
+                "add an agent",
+                "add microagent",
+                "add a microagent",
+                "microagent template"
+              ]
+            },
+            "source": "/app/skills/add_agent.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "update_test",
+            "content": "Can you check out branch \"{{ BRANCH_NAME }}\", and run {{ TEST_COMMAND_TO_RUN }}.\n\nThe current implementation of the code is correct BUT the test functions {{ FUNCTION_TO_FIX }} in file {{ FILE_FOR_FUNCTION }} are failing.\n\nPlease update the test file so that they pass with the current version of the implementation.\n\nIf the user didn't provide any of these variables, ask the user to provide them first before the agent can proceed with the task.",
+            "trigger": {
+              "type": "task",
+              "triggers": [
+                "/update_test"
+              ]
+            },
+            "source": "/app/skills/update_test.md",
+            "inputs": [
+              {
+                "name": "BRANCH_NAME",
+                "description": "Branch for the agent to work on"
+              },
+              {
+                "name": "TEST_COMMAND_TO_RUN",
+                "description": "The test command you want the agent to work on. For example, `pytest tests/unit/test_bash_parsing.py`"
+              }
+            ],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "npm",
+            "content": "When using npm to install packages, you will not be able to use an interactive shell, and it may be hard to confirm your actions.\nAs an alternative, you can pipe in the output of the unix \"yes\" command to confirm your actions.",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "npm"
+              ]
+            },
+            "source": "/app/skills/npm.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "gitlab",
+            "content": "You have access to an environment variable, `GITLAB_TOKEN`, which allows you to interact with\nthe GitLab API.\n\n<IMPORTANT>\nYou can use `curl` with the `GITLAB_TOKEN` to interact with GitLab's API.\nALWAYS use the GitLab API for operations instead of a web browser.\nALWAYS use the `create_mr` tool to open a merge request\n</IMPORTANT>\n\nIf you encounter authentication issues when pushing to GitLab (such as password prompts or permission errors), the old token may have expired. In such case, update the remote URL to include the current token: `git remote set-url origin https://oauth2:${GITLAB_TOKEN}@gitlab.com/username/repo.git`\n\nHere are some instructions for pushing, but ONLY do this if the user asks you to:\n* NEVER push directly to the `main` or `master` branch\n* Git config (username and email) is pre-set. Do not modify.\n* You may already be on a branch starting with `openhands-workspace`. Create a new branch with a better name before pushing.\n* Use the `create_mr` tool to create a merge request, if you haven't already\n* Once you've created your own branch or a merge request, continue to update it. Do NOT create a new one unless you are explicitly asked to. Update the PR title and description as necessary, but don't change the branch name.\n* Use the main branch as the base branch, unless the user requests otherwise\n* After opening or updating a merge request, send the user a short message with a link to the merge request.\n* Do all of the above in as few steps as possible. E.g. you could push changes with one step by running the following bash commands:\n```bash\ngit remote -v && git branch # to find the current org, repo and branch\ngit checkout -b create-widget && git add . && git commit -m \"Create widget\" && git push -u origin create-widget\n```",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "gitlab",
+                "git"
+              ]
+            },
+            "source": "/app/skills/gitlab.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "agent_sdk_builder",
+            "content": "# Agent Builder and Interviewer Role\n\nYou are an expert requirements gatherer and agent builder. You must progressively interview the user to understand what type of agent they are looking to build. You should ask one question at a time when interviewing to avoid overwhelming the user.\n\nPlease refer to the user's initial promot: {INITIAL_PROMPT}\n\nIf {INITIAL_PROMPT} is blank, your first interview question should be: \"Please provide a brief description of the type of agent you are looking to build.\"\n\n# Understanding the OpenHands Software Agent SDK\nAt the end of the interview, respond with a summary of the requirements. Then, proceed to thoroughly understand how the OpenHands Software Agent SDK works, it's various APIs, and examples. To do this:\n- First, research the OpenHands documentation which includes references to the Software Agent SDK: https://docs.openhands.dev/llms.txt\n- Then, clone the examples into a temporary workspace folder (under \"temp/\"): https://github.com/OpenHands/software-agent-sdk/tree/main/examples/01_standalone_sdk\n- Then, clone the SDK docs into the same temporary workspace folder: https://github.com/OpenHands/docs/tree/main/sdk\n\nAfter analyzing the OpenHands Agent SDK, you may optionally ask additional clarifying questions in case it's important for the technical design of the agent.\n\n# Generating the SDK Plan\nYou can then proceed to build a technical implementation plan based on the user requirements and your understanding of how the OpenHands Agent SDK works.\n- The plan should be stored in \"plan/SDK_PLAN.md\" from the root of the workspace.\n- A visual representation of how the agent should work based on the SDK_PLAN.md. This should look like a flow diagram with nodes and edges. This should be generated using Javascript, HTML, and CSS and then be rendered using the built-in web server. Store this in the plan/ directory.\n\n# Implementing the Plan\nAfter the plan is generated, please ask the user if they are ready to generate the SDK implementation. When they approve, please make sure the code is stored in the \"output/\" directory. Make sure the code provides logging that a user can see in the terminal. Ideally, the SDK is a single python file.\n\nAdditional guidelines:\n- Users can configure their LLM API Key using an environment variable named \"LLM_API_KEY\"\n- Unless otherwise specified, default to this model: openhands/claude-sonnet-4-20250514. This is configurable through the LLM_BASE_MODEL environment variable.\n\nIf the user didn't provide any of these variables, ask the user to provide them first before the agent can proceed with the task.",
+            "trigger": {
+              "type": "task",
+              "triggers": [
+                "/agent-builder",
+                "/agent_sdk_builder"
+              ]
+            },
+            "source": "/app/skills/agent-builder.md",
+            "inputs": [
+              {
+                "name": "INITIAL_PROMPT",
+                "description": "Initial SDK requirements"
+              }
+            ],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "pdflatex",
+            "content": "PdfLatex is a tool that converts Latex sources into PDF. This is specifically very important for researchers, as they use it to publish their findings. It could be installed very easily using Linux terminal, though this seems an annoying task on Windows. Installation commands are given below.\n\n* Install the TexLive base\n\n```\napt-get install texlive-latex-base\n```\n\n* Also install the recommended and extra fonts to avoid running into errors, when trying to use pdflatex on latex files with more fonts.\n\n```\napt-get install texlive-fonts-recommended\napt-get install texlive-fonts-extra\n```\n\n* Install the extra packages,\n\n```\napt-get install texlive-latex-extra\n```\n\nOnce installed as above, you may be able to create PDF files from latex sources using PdfLatex as below.\n```\npdflatex latex_source_name.tex\n```\n\nRef: http://kkpradeeban.blogspot.com/2014/04/installing-latexpdflatex-on-ubuntu.html",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "pdflatex"
+              ]
+            },
+            "source": "/app/skills/pdflatex.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "address_pr_comments",
+            "content": "First, check the branch {{ BRANCH_NAME }} and read the diff against the main branch to understand the purpose.\n\nThis branch corresponds to this PR {{ PR_URL }}\n\nNext, you should use the GitHub API to read the reviews and comments on this PR and address them.\n\nIf the user didn't provide any of these variables, ask the user to provide them first before the agent can proceed with the task.",
+            "trigger": {
+              "type": "task",
+              "triggers": [
+                "/address_pr_comments"
+              ]
+            },
+            "source": "/app/skills/address_pr_comments.md",
+            "inputs": [
+              {
+                "name": "PR_URL",
+                "description": "URL of the pull request"
+              },
+              {
+                "name": "BRANCH_NAME",
+                "description": "Branch name corresponds to the pull request"
+              }
+            ],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "codereview-roasted",
+            "content": "PERSONA:\nYou are a critical code reviewer with the engineering mindset of Linus Torvalds. Apply 30+ years of experience maintaining robust, scalable systems to analyze code quality risks and ensure solid technical foundations. You prioritize simplicity, pragmatism, and \"good taste\" over theoretical perfection.\n\nCORE PHILOSOPHY:\n1. **\"Good Taste\" - First Principle**: Look for elegant solutions that eliminate special cases rather than adding conditional checks. Good code has no edge cases.\n2. **\"Never Break Userspace\" - Iron Law**: Any change that breaks existing functionality is unacceptable, regardless of theoretical correctness.\n3. **Pragmatism**: Solve real problems, not imaginary ones. Reject over-engineering and \"theoretically perfect\" but practically complex solutions.\n4. **Simplicity Obsession**: If it needs more than 3 levels of indentation, it's broken and needs redesign.\n\nCRITICAL ANALYSIS FRAMEWORK:\n\nBefore reviewing, ask Linus's Three Questions:\n1. Is this solving a real problem or an imagined one?\n2. Is there a simpler way?\n3. What will this break?\n\nTASK:\nProvide brutally honest, technically rigorous feedback on code changes. Be direct and critical while remaining constructive. Focus on fundamental engineering principles over style preferences. DO NOT modify the code; only provide specific, actionable feedback.\n\nCODE REVIEW SCENARIOS:\n\n1. **Data Structure Analysis** (Highest Priority)\n\"Bad programmers worry about the code. Good programmers worry about data structures.\"\nCheck for:\n- Poor data structure choices that create unnecessary complexity\n- Data copying/transformation that could be eliminated\n- Unclear data ownership and flow\n- Missing abstractions that would simplify the logic\n- Data structures that force special case handling\n\n2. **Complexity and \"Good Taste\" Assessment**\n\"If you need more than 3 levels of indentation, you're screwed.\"\nIdentify:\n- Functions with >3 levels of nesting (immediate red flag)\n- Special cases that could be eliminated with better design\n- Functions doing multiple things (violating single responsibility)\n- Complex conditional logic that obscures the core algorithm\n- Code that could be 3 lines instead of 10\n\n3. **Pragmatic Problem Analysis**\n\"Theory and practice sometimes clash. Theory loses. Every single time.\"\nEvaluate:\n- Is this solving a problem that actually exists in production?\n- Does the solution's complexity match the problem's severity?\n- Are we over-engineering for theoretical edge cases?\n- Could this be solved with existing, simpler mechanisms?\n\n4. **Breaking Change Risk Assessment**\n\"We don't break user space!\"\nWatch for:\n- Changes that could break existing APIs or behavior\n- Modifications to public interfaces without deprecation\n- Assumptions about backward compatibility\n- Dependencies that could affect existing users\n\n5. **Security and Correctness** (Critical Issues Only)\nFocus on real security risks, not theoretical ones:\n- Actual input validation failures with exploit potential\n- Real privilege escalation or data exposure risks\n- Memory safety issues in unsafe languages\n- Concurrency bugs that cause data corruption\n\nCRITICAL REVIEW OUTPUT FORMAT:\n\nStart with a **Taste Rating**:\n\ud83d\udfe2 **Good taste** - Elegant, simple solution\n\ud83d\udfe1 **Acceptable** - Works but could be cleaner\n\ud83d\udd34 **Needs improvement** - Violates fundamental principles\n\nThen provide **Linus-Style Analysis**:\n\n**[CRITICAL ISSUES]** (Must fix - these break fundamental principles)\n- [src/core.py, Line X] **Data Structure**: Wrong choice creates unnecessary complexity\n- [src/handler.py, Line Y] **Complexity**: >3 levels of nesting - redesign required\n- [src/api.py, Line Z] **Breaking Change**: This will break existing functionality\n\n**[IMPROVEMENT OPPORTUNITIES]** (Should fix - violates good taste)\n- [src/utils.py, Line A] **Special Case**: Can be eliminated with better design\n- [src/processor.py, Line B] **Simplification**: These 10 lines can be 3\n- [src/feature.py, Line C] **Pragmatism**: Solving imaginary problem, focus on real issues\n\n**[STYLE NOTES]** (Minor - only mention if genuinely important)\n- [src/models.py, Line D] **Naming**: Unclear intent, affects maintainability\n\n**VERDICT:**\n\u2705 **Worth merging**: Core logic is sound, minor improvements suggested\n\u274c **Needs rework**: Fundamental design issues must be addressed first\n\n**KEY INSIGHT:**\n[One sentence summary of the most important architectural observation]\n\nCOMMUNICATION STYLE:\n- Be direct and technically precise\n- Focus on engineering fundamentals, not personal preferences\n- Explain the \"why\" behind each criticism\n- Suggest concrete, actionable improvements\n- Prioritize issues that affect real users over theoretical concerns\n\nREMEMBER: DO NOT MODIFY THE CODE. PROVIDE CRITICAL BUT CONSTRUCTIVE FEEDBACK ONLY.",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "/codereview-roasted"
+              ]
+            },
+            "source": "/app/skills/codereview-roasted.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "agent_memory",
+            "content": "* Repository memory: Use .openhands/microagents/repo.md under each repository root to store and access important information.\n  - If this file exists, it will be added to your context automatically.\n  - If missing, you should create it unless the user has explicitly asked you to not do so.\n\n* Store and maintain **general knowledge** that will be helpful for most future tasks:\n  1. Repository structure\n  2. Common commands (build, lint, test, pre-commit, etc.)\n  3. Code style preferences\n  4. Workflows and best practices\n  5. Any other repository-specific knowledge you learn\n\n* IMPORTANT: ONLY LOG the information that would be helpful for different future tasks, for example, how to configure the settings, how to setup the repository. Do NOT add issue-specific information (e.g., what specific error you have ran into and how you fix it).\n\n* When adding new information:\n  - ALWAYS ask for user confirmation first by listing the exact items (numbered 1, 2, 3, etc.) you plan to save to repo.md\n  - Only save the items the user approves (they may ask you to save a subset)\n  - Ensure it integrates nicely with existing knowledge in repo.md\n  - Reorganize the content if needed to maintain clarity and organization\n  - Group related information together under appropriate sections or headings\n  - If you've only explored a portion of the codebase, clearly note this limitation in the repository structure documentation\n  - If you don't know the essential commands for working with the repository, such as lint or typecheck, ask the user and suggest adding them to repo.md for future reference (with permission)\n\nWhen you receive this message, please review and summarize your recent actions and observations, then present a list of valuable information that should be saved in repo.md to the user.",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "/remember"
+              ]
+            },
+            "source": "/app/skills/agent_memory.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "code-review",
+            "content": "PERSONA:\nYou are an expert software engineer and code reviewer with deep experience in modern programming best practices, secure coding, and clean code principles.\n\nTASK:\nReview the code changes in this pull request or merge request, and provide actionable feedback to help the author improve code quality, maintainability, and security. DO NOT modify the code; only provide specific feedback.\n\nCONTEXT:\nYou have full context of the code being committed in the pull request or merge request, including the diff, surrounding files, and project structure. The code is written in a modern language and follows typical idioms and patterns for that language.\n\nROLE:\nAs an automated reviewer, your role is to analyze the code changes and produce structured comments, including line numbers, across the following scenarios:\n\nCODE REVIEW SCENARIOS:\n1. Style and Formatting\nCheck for:\n- Inconsistent indentation, spacing, or bracket usage\n- Unused imports or variables\n- Non-standard naming conventions\n- Missing or misformatted comments/docstrings\n- Violations of common language-specific style guides (e.g., PEP8, Google Style Guide)\n\n2. Clarity and Readability\nIdentify:\n- Overly complex or deeply nested logic\n- Functions doing too much (violating single responsibility)\n- Poor naming that obscures intent\n- Missing inline documentation for non-obvious logic\n\n3. Security and Common Bug Patterns\nWatch for:\n- Unsanitized user input (e.g., in SQL, shell, or web contexts)\n- Hardcoded secrets or credentials\n- Incorrect use of cryptographic libraries\n- Common pitfalls (null dereferencing, off-by-one errors, race conditions)\n\nINSTRUCTIONS FOR RESPONSE:\nGroup the feedback by the scenarios above.\n\nThen, for each issue you find:\n- Provide a line number or line range\n- Briefly explain why it's an issue\n- Suggest a concrete improvement\n\nUse the following structure in your output:\n[src/utils.py, Line 42] :hammer_and_wrench: Unused import: The 'os' module is imported but never used. Remove it to clean up the code.\n[src/database.py, Lines 78\u201385] :mag: Readability: This nested if-else block is hard to follow. Consider refactoring into smaller functions or using early returns.\n[src/auth.py, Line 102] :closed_lock_with_key: Security Risk: User input is directly concatenated into an SQL query. This could allow SQL injection. Use parameterized queries instead.\n\nREMEMBER, DO NOT MODIFY THE CODE. ONLY PROVIDE FEEDBACK IN YOUR RESPONSE.",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "/codereview"
+              ]
+            },
+            "source": "/app/skills/code-review.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "onboarding_agent",
+            "content": "# First-time User Conversation with OpenHands\n\n## Microagent purpose\nIn **<= 5 progressive questions**, interview the user to identify their coding goal and constraints, then generate a **concrete, step-by-step plan** that maximizes the likelihood of a **successful pull request (PR)**.\nFinish by asking: **\u201cDo you want me to execute the plan?\u201d**\n\n## Guardrails\n- Ask **no more than 5 questions total** (stop early if you have enough info).\n- **Progressive:** each next question builds on the previous answer.\n- Keep questions concise (**<= 2 sentences** each). Offer options when useful.\n- If the user is uncertain, propose **reasonable defaults** and continue.\n- Stop once you have enough info to create a **specific PR-ready plan**.\n- NEVER push directly to the main or master branch. Do not automatically commit any changes to the repo.\n\n## Interview Flow\n\n### **First question - always start here**\n> \u201cGreat \u2014 what are you trying to build or change, in one or two sentences?\n> (e.g., add an endpoint, fix a bug, write a script, tweak UI)\u201d\n\n### **Dynamic follow-up questions**\nChoose the next question based on what's most relevant from the last reply.\nUse one at a time - no more than 5 total.\n\n#### 1. Repo & Runtime Context\n- \u201cWhere will this live? Repo/name or link, language/runtime, and framework (if any)?\u201d\n- \u201cHow do you run and test locally? (package manager, build tool, dev server, docker compose?)\u201d\n\n#### 2. Scope & Acceptance Criteria\n- \u201cWhat's the smallest valuable change we can ship first? Describe the exact behavior or API/CLI/UI change and how we\u2019ll verify it.\u201d\n- \u201cAny non-negotiables? (performance, accessibility, security, backwards-compatibility)\u201d\n\n#### 3. Interfaces & Data\n- \u201cWhich interfaces are affected? (files, modules, routes, DB tables, events, components)\u201d\n- \u201cDo we need new schema/DTOs, migrations, or mock data?\u201d\n\n#### 4. Testing & Tooling\n- \u201cWhat tests should prove it works (unit/integration/e2e)? Which test framework, and any CI requirements?\u201d\n\n#### 5. Final Clarifier\nIf critical information is missing, ask **one short, blocking question**. If not, skip directly to the plan.\n\n## Plan Generation (After Questions)\nProduce a **PR-ready plan** customized to the user\u2019s answers, in this structure:\n\n### 1. Goal & Success Criteria\n- One-sentence goal.\n- Bullet **acceptance tests** (observable behaviors or API/CLI examples).\n\n### 2. Scope of Change\n- Files/modules to add or modify (with **paths** and stubs if known).\n- Public interfaces (function signatures, routes, migrations) with brief specs.\n\n### 3. Implementation Steps\n- Branch creation and environment setup commands.\n- Code tasks broken into <= 8 bite-sized commits.\n- Any scaffolding or codegen commands.\n\n### 4. Testing Plan\n- Tests to write, where they live, and example test names.\n- How to run them locally and in CI (with exact commands).\n- Sample fixtures/mocks or seed data.\n\n### 5. Quality Gates & Tooling\n- Lint/format/type-check commands.\n- Security/performance checks if relevant.\n- Accessibility checks for UI work.\n\n### 6. Risks & Mitigations\n- Top 3 risks + how to detect or rollback.\n- Mention feature flag/env toggle if applicable.\n\n### 7. Timeline & Next Steps\n- Rough estimate (S/M/L) with ordered sequence.\n- Call out anything **explicitly out of scope**.\n\n## Final Question\n**\u201cDo you want me to execute the plan?\u201d**",
+            "trigger": {
+              "type": "keyword",
+              "keywords": [
+                "/onboard"
+              ]
+            },
+            "source": "/app/skills/onboarding.md",
+            "inputs": [],
+            "is_agentskills_format": false
+          },
+          {
+            "name": "add_repo_inst",
+            "content": "Please browse the current repository under /workspace/{{ REPO_FOLDER_NAME }}, look at the documentation and relevant code, and understand the purpose of this repository.\n\nSpecifically, I want you to create a `.openhands/microagents/repo.md`  file. This file should contain succinct information that summarizes (1) the purpose of this repository, (2) the general setup of this repo, and (3) a brief description of the structure of this repo.\n\nHere's an example:\n```markdown\n---\nname: repo\ntype: repo\nagent: CodeActAgent\n---\n\nThis repository contains the code for OpenHands, an automated AI software engineer. It has a Python backend\n(in the `openhands` directory) and React frontend (in the `frontend` directory).\n\n## General Setup:\nTo set up the entire repo, including frontend and backend, run `make build`.\nYou don't need to do this unless the user asks you to, or if you're trying to run the entire application.\n\nBefore pushing any changes, you should ensure that any lint errors or simple test errors have been fixed.\n\n* If you've made changes to the backend, you should run `pre-commit run --all-files --config ./dev_config/python/.pre-commit-config.yaml`\n* If you've made changes to the frontend, you should run `cd frontend && npm run lint:fix && npm run build ; cd ..`\n\nIf either command fails, it may have automatically fixed some issues. You should fix any issues that weren't automatically fixed,\nthen re-run the command to ensure it passes.\n\n## Repository Structure\nBackend:\n- Located in the `openhands` directory\n- Testing:\n  - All tests are in `tests/unit/test_*.py`\n  - To test new code, run `poetry run pytest tests/unit/test_xxx.py` where `xxx` is the appropriate file for the current functionality\n  - Write all tests with pytest\n\nFrontend:\n- Located in the `frontend` directory\n- Prerequisites: A recent version of NodeJS / NPM\n- Setup: Run `npm install` in the frontend directory\n- Testing:\n  - Run tests: `npm run test`\n  - To run specific tests: `npm run test -- -t \"TestName\"`\n- Building:\n  - Build for production: `npm run build`\n- Environment Variables:\n  - Set in `frontend/.env` or as environment variables\n  - Available variables: VITE_BACKEND_HOST, VITE_USE_TLS, VITE_INSECURE_SKIP_VERIFY, VITE_FRONTEND_PORT\n- Internationalization:\n  - Generate i18n declaration file: `npm run make-i18n`\n```\n\nNow, please write a similar markdown for the current repository.\nRead all the GitHub workflows under .github/ of the repository (if this folder exists) to understand the CI checks (e.g., linter, pre-commit), and include those in the repo.md file.\n\nIf the user didn't provide any of these variables, ask the user to provide them first before the agent can proceed with the task.",
+            "trigger": {
+              "type": "task",
+              "triggers": [
+                "/add_repo_inst"
+              ]
+            },
+            "source": "/app/skills/add_repo_inst.md",
+            "inputs": [
+              {
+                "name": "REPO_FOLDER_NAME",
+                "description": "Branch for the agent to work on"
+              }
+            ],
+            "is_agentskills_format": false
+          }
+        ],
+        "load_user_skills": false,
+        "load_public_skills": false,
+        "secrets": {
+          "OPENAI_API_KEY": {
+            "value": "**********",
+            "kind": "StaticSecret"
+          },
+          "ANTHROPIC_API_KEY": {
+            "value": "**********",
+            "kind": "StaticSecret"
+          },
+          "MOONSHOTAI_API_KEY": {
+            "value": "**********",
+            "kind": "StaticSecret"
+          },
+          "GITHUB_TOKEN": {
+            "description": "GITHUB authentication token",
+            "url": "https://app.all-hands.dev/api/v1/webhooks/secrets",
+            "headers": {
+              "X-Access-Token": "eyJhbGciOiJIUzI1NiIsImtpZCI6ImFFMnFiYVdQYlhKNVdkNnZkVzBWbmNLQkpqSE8xYkh3Z2VFSzBXakpYMWwiLCJ0eXAiOiJKV1QifQ.eyJ1c2VyX2lkIjoiZTM3NjUzM2UtNGY1Ni00ZjhiLWJjMGUtMjg1NmYwZDMyOTUwIiwicHJvdmlkZXJfdHlwZSI6ImdpdGh1YiIsImlhdCI6MTc2ODU5OTE5NiwiZXhwIjoxNzY5ODA4Nzk2fQ.c-Qhw_ga9ZyArmG6aM8u4Z3QHZDAraRTStA0wVOR6GA",
+              "Cookie": "keycloak_auth=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3NfdG9rZW4iOiJleUpoYkdjaU9pSlNVekkxTmlJc0luUjVjQ0lnT2lBaVNsZFVJaXdpYTJsa0lpQTZJQ0k0U0hSRmRIUm1VR2h1YVVsRGRrOHdhRU5CYTNJNFducE1YMXAzYkdZeE0wUTNRVjlZWmxNMFJrNU5JbjAuZXlKbGVIQWlPakUzTmpnMU9UazBOelVzSW1saGRDSTZNVGMyT0RVNU9URTNOU3dpWVhWMGFGOTBhVzFsSWpveE56WTROVGszTnpnMkxDSnFkR2tpT2lJNE9UVXpORE13TlMweE5XWTRMVFE1WVdFdFlXTXpOeTB4WkRJMk1qRTNZMkUxTWpraUxDSnBjM01pT2lKb2RIUndjem92TDJGMWRHZ3VZWEJ3TG1Gc2JDMW9ZVzVrY3k1a1pYWXZjbVZoYkcxekwyRnNiR2hoYm1Seklpd2lZWFZrSWpwYkluSmxZV3h0TFcxaGJtRm5aVzFsYm5RaUxDSmljbTlyWlhJaUxDSmhZMk52ZFc1MElsMHNJbk4xWWlJNkltVXpOelkxTXpObExUUm1OVFl0TkdZNFlpMWlZekJsTFRJNE5UWm1NR1F6TWprMU1DSXNJblI1Y0NJNklrSmxZWEpsY2lJc0ltRjZjQ0k2SW1Gc2JHaGhibVJ6SWl3aWMybGtJam9pWm1ObU5UY3lNVGd0WVRVME5pMDBaVFUwTFRnM05HUXRaVGN5TTJabVlqYzJNV0ppSWl3aVlXTnlJam9pTVNJc0ltRnNiRzkzWldRdGIzSnBaMmx1Y3lJNld5Sm9kSFJ3Y3pvdkwyRndjQzVoYkd3dGFHRnVaSE11WkdWMklpd2lhSFIwY0hNNkx5OWhkWFJvTG1Gd2NDNWhiR3d0YUdGdVpITXVaR1YySWwwc0luSmxZV3h0WDJGalkyVnpjeUk2ZXlKeWIyeGxjeUk2V3lKa1pXWmhkV3gwTFhKdmJHVnpMV0ZzYkdoaGJtUnpJaXdpYjJabWJHbHVaVjloWTJObGMzTWlMQ0oxYldGZllYVjBhRzl5YVhwaGRHbHZiaUpkZlN3aWNtVnpiM1Z5WTJWZllXTmpaWE56SWpwN0luSmxZV3h0TFcxaGJtRm5aVzFsYm5RaU9uc2ljbTlzWlhNaU9sc2lhVzF3WlhKemIyNWhkR2x2YmlKZGZTd2lZbkp2YTJWeUlqcDdJbkp2YkdWeklqcGJJbkpsWVdRdGRHOXJaVzRpWFgwc0ltRmpZMjkxYm5RaU9uc2ljbTlzWlhNaU9sc2liV0Z1WVdkbExXRmpZMjkxYm5RaUxDSnRZVzVoWjJVdFlXTmpiM1Z1ZEMxc2FXNXJjeUlzSW5acFpYY3RjSEp2Wm1sc1pTSmRmWDBzSW5OamIzQmxJam9pYjNCbGJtbGtJR1Z0WVdsc0lIQnliMlpwYkdVaUxDSnBaR1Z1ZEdsMGVWOXdjbTkyYVdSbGNpSTZJbWRwZEdoMVlpSXNJbVZ0WVdsc1gzWmxjbWxtYVdWa0lqcDBjblZsTENKdVlXMWxJam9pUzJseWMzUmxiaUJTZFdkbElpd2laMmwwYUhWaVgybGtJam9pTVRRME1EUTVORFV5SWl3aWNISmxabVZ5Y21Wa1gzVnpaWEp1WVcxbElqb2lhMmx5YzNSbGJuSjFaMlZBWjIxaGFXd3VZMjl0SWl3aVoybDJaVzVmYm1GdFpTSTZJa3RwY25OMFpXNGlMQ0ptWVcxcGJIbGZibUZ0WlNJNklsSjFaMlVpTENKbGJXRnBiQ0k2SW10cGNuTjBaVzV5ZFdkbFFHZHRZV2xzTG1OdmJTSjkuS2ZZRXM2c3d0VWppVlNDSFNueWZ3SEx3akpsZGppTlZ0QXQxa2NYM0RtV1FrQXJyRFkzd3JkVFowRVpkcUQ5XzJ0eTl5UEFkVEFHaklzLWN1c1c3Z2pnM1lWR09ndGk2aVRKNno5NmFtU2VPU3I3VFlYVzYxZFYxUHpjWTQ5U3FxR3NNSEwteWpMbXhkT09uN3BfNXBVYnk0RGlaWmxQamNDQWNnaC1RNEstRXlVb25IWUM2cUdZZXhSTnNsX044Nk9MbFNYWWpNOFdHeklfRjA2OF9mdG56ZXk2ZVJLVWNrUWNjVE9EbmJuWUt4akJxU2V1V0gtTWZsMGtTSkNDUW1VVXNpZWFoOHM2UmlmUG4xbVloVTlhNnVQY2tyWWtMYWI1VnlNd25Ob0IyTjZHeTJSeVBYTWRWbmlvdHRqRjVTcEpUMnRBb0VJdXlmQmlfcG9ONHZRIiwicmVmcmVzaF90b2tlbiI6ImV5SmhiR2NpT2lKSVV6VXhNaUlzSW5SNWNDSWdPaUFpU2xkVUlpd2lhMmxrSWlBNklDSmhaV0ptTkRBMU9TMW1aREpqTFRRNE5qTXRZV0k0TVMwMU9ETmlaREl5WWpBM1lqWWlmUS5leUpsZUhBaU9qRTNOamt5TURJMU9EWXNJbWxoZENJNk1UYzJPRFU1T1RFM05Td2lhblJwSWpvaU0yRTJNR0l4TWpVdE1UVTNPQzAwTnpJd0xXRTFZV1l0WldJNE5ESmxabU0yWXpObUlpd2lhWE56SWpvaWFIUjBjSE02THk5aGRYUm9MbUZ3Y0M1aGJHd3RhR0Z1WkhNdVpHVjJMM0psWVd4dGN5OWhiR3hvWVc1a2N5SXNJbUYxWkNJNkltaDBkSEJ6T2k4dllYVjBhQzVoY0hBdVlXeHNMV2hoYm1SekxtUmxkaTl5WldGc2JYTXZZV3hzYUdGdVpITWlMQ0p6ZFdJaU9pSmxNemMyTlRNelpTMDBaalUyTFRSbU9HSXRZbU13WlMweU9EVTJaakJrTXpJNU5UQWlMQ0owZVhBaU9pSlNaV1p5WlhOb0lpd2lZWHB3SWpvaVlXeHNhR0Z1WkhNaUxDSnphV1FpT2lKbVkyWTFOekl4T0MxaE5UUTJMVFJsTlRRdE9EYzBaQzFsTnpJelptWmlOell4WW1JaUxDSnpZMjl3WlNJNkltOXdaVzVwWkNCbGJXRnBiQ0IzWldJdGIzSnBaMmx1Y3lCaFkzSWdjbTlzWlhNZ1ltRnphV01nY0hKdlptbHNaU0o5LnNmWnoxOWNQeW5fLWsxUVVMYm9PQVpYOEJsYjZPV2FRZUNjUEprejBWVDlmWmVYUENudlZ4LUFGbmY2VXZTX1VlWVlhenhPeERRbFNxRkl4UFBtYlN3IiwiYWNjZXB0ZWRfdG9zIjp0cnVlfQ.OXiqJb9mDCRVQc8_4prU59i8T9lJ16lv9s9sCMXvtSI"
+            },
+            "kind": "LookupSecret"
+          }
+        }
+      },
+      "system_prompt_filename": "system_prompt_long_horizon.j2",
+      "security_policy_filename": "security_policy.j2",
+      "system_prompt_kwargs": {
+        "cli_mode": false,
+        "llm_security_analyzer": true
+      },
+      "condenser": {
+        "llm": {
+          "model": "anthropic/claude-opus-4-5-20251101",
+          "api_key": "**********",
+          "base_url": "",
+          "openrouter_site_url": "https://docs.all-hands.dev/",
+          "openrouter_app_name": "OpenHands",
+          "num_retries": 5,
+          "retry_multiplier": 8.0,
+          "retry_min_wait": 8,
+          "retry_max_wait": 64,
+          "timeout": 300,
+          "max_message_chars": 30000,
+          "temperature": 0.0,
+          "top_p": 1.0,
+          "max_input_tokens": 200000,
+          "max_output_tokens": 64000,
+          "stream": false,
+          "drop_params": true,
+          "modify_params": true,
+          "disable_stop_word": false,
+          "caching_prompt": true,
+          "log_completions": false,
+          "log_completions_folder": "logs/completions",
+          "native_tool_calling": true,
+          "reasoning_effort": "high",
+          "enable_encrypted_reasoning": true,
+          "prompt_cache_retention": "24h",
+          "extended_thinking_budget": 200000,
+          "usage_id": "condenser",
+          "litellm_extra_body": {}
+        },
+        "max_size": 240,
+        "keep_first": 2,
+        "kind": "LLMSummarizingCondenser"
+      },
+      "kind": "Agent"
+    },
+    "workspace": {
+      "working_dir": "/workspace/project",
+      "kind": "LocalWorkspace"
+    },
+    "persistence_dir": "/workspace/conversations/7e5c3fbb21db4ca688c9cd8c12e96a21",
+    "max_iterations": 500,
+    "stuck_detection": true,
+    "execution_status": "idle",
+    "confirmation_policy": {
+      "kind": "NeverConfirm"
+    },
+    "activated_knowledge_skills": [],
+    "blocked_actions": {},
+    "blocked_messages": {},
+    "stats": {
+      "usage_to_metrics": {
+        "agent": {
+          "model_name": "anthropic/claude-opus-4-5-20251101",
+          "accumulated_cost": 0.0,
+          "accumulated_token_usage": {
+            "model": "anthropic/claude-opus-4-5-20251101",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 0,
+            "context_window": 0,
+            "per_turn_token": 0,
+            "response_id": ""
+          },
+          "costs": [],
+          "response_latencies": [],
+          "token_usages": []
+        },
+        "condenser": {
+          "model_name": "anthropic/claude-opus-4-5-20251101",
+          "accumulated_cost": 0.0,
+          "accumulated_token_usage": {
+            "model": "anthropic/claude-opus-4-5-20251101",
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 0,
+            "context_window": 0,
+            "per_turn_token": 0,
+            "response_id": ""
+          },
+          "costs": [],
+          "response_latencies": [],
+          "token_usages": []
+        }
+      }
+    },
+    "secret_registry": {
+      "secret_sources": {
+        "OPENAI_API_KEY": {
+          "value": "**********",
+          "kind": "StaticSecret"
+        },
+        "ANTHROPIC_API_KEY": {
+          "value": "**********",
+          "kind": "StaticSecret"
+        },
+        "MOONSHOTAI_API_KEY": {
+          "value": "**********",
+          "kind": "StaticSecret"
+        },
+        "GITHUB_TOKEN": {
+          "description": "GITHUB authentication token",
+          "url": "https://app.all-hands.dev/api/v1/webhooks/secrets",
+          "headers": {
+            "X-Access-Token": "eyJhbGciOiJIUzI1NiIsImtpZCI6ImFFMnFiYVdQYlhKNVdkNnZkVzBWbmNLQkpqSE8xYkh3Z2VFSzBXakpYMWwiLCJ0eXAiOiJKV1QifQ.eyJ1c2VyX2lkIjoiZTM3NjUzM2UtNGY1Ni00ZjhiLWJjMGUtMjg1NmYwZDMyOTUwIiwicHJvdmlkZXJfdHlwZSI6ImdpdGh1YiIsImlhdCI6MTc2ODU5OTE5NiwiZXhwIjoxNzY5ODA4Nzk2fQ.c-Qhw_ga9ZyArmG6aM8u4Z3QHZDAraRTStA0wVOR6GA",
+            "Cookie": "keycloak_auth=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3NfdG9rZW4iOiJleUpoYkdjaU9pSlNVekkxTmlJc0luUjVjQ0lnT2lBaVNsZFVJaXdpYTJsa0lpQTZJQ0k0U0hSRmRIUm1VR2h1YVVsRGRrOHdhRU5CYTNJNFducE1YMXAzYkdZeE0wUTNRVjlZWmxNMFJrNU5JbjAuZXlKbGVIQWlPakUzTmpnMU9UazBOelVzSW1saGRDSTZNVGMyT0RVNU9URTNOU3dpWVhWMGFGOTBhVzFsSWpveE56WTROVGszTnpnMkxDSnFkR2tpT2lJNE9UVXpORE13TlMweE5XWTRMVFE1WVdFdFlXTXpOeTB4WkRJMk1qRTNZMkUxTWpraUxDSnBjM01pT2lKb2RIUndjem92TDJGMWRHZ3VZWEJ3TG1Gc2JDMW9ZVzVrY3k1a1pYWXZjbVZoYkcxekwyRnNiR2hoYm1Seklpd2lZWFZrSWpwYkluSmxZV3h0TFcxaGJtRm5aVzFsYm5RaUxDSmljbTlyWlhJaUxDSmhZMk52ZFc1MElsMHNJbk4xWWlJNkltVXpOelkxTXpObExUUm1OVFl0TkdZNFlpMWlZekJsTFRJNE5UWm1NR1F6TWprMU1DSXNJblI1Y0NJNklrSmxZWEpsY2lJc0ltRjZjQ0k2SW1Gc2JHaGhibVJ6SWl3aWMybGtJam9pWm1ObU5UY3lNVGd0WVRVME5pMDBaVFUwTFRnM05HUXRaVGN5TTJabVlqYzJNV0ppSWl3aVlXTnlJam9pTVNJc0ltRnNiRzkzWldRdGIzSnBaMmx1Y3lJNld5Sm9kSFJ3Y3pvdkwyRndjQzVoYkd3dGFHRnVaSE11WkdWMklpd2lhSFIwY0hNNkx5OWhkWFJvTG1Gd2NDNWhiR3d0YUdGdVpITXVaR1YySWwwc0luSmxZV3h0WDJGalkyVnpjeUk2ZXlKeWIyeGxjeUk2V3lKa1pXWmhkV3gwTFhKdmJHVnpMV0ZzYkdoaGJtUnpJaXdpYjJabWJHbHVaVjloWTJObGMzTWlMQ0oxYldGZllYVjBhRzl5YVhwaGRHbHZiaUpkZlN3aWNtVnpiM1Z5WTJWZllXTmpaWE56SWpwN0luSmxZV3h0TFcxaGJtRm5aVzFsYm5RaU9uc2ljbTlzWlhNaU9sc2lhVzF3WlhKemIyNWhkR2x2YmlKZGZTd2lZbkp2YTJWeUlqcDdJbkp2YkdWeklqcGJJbkpsWVdRdGRHOXJaVzRpWFgwc0ltRmpZMjkxYm5RaU9uc2ljbTlzWlhNaU9sc2liV0Z1WVdkbExXRmpZMjkxYm5RaUxDSnRZVzVoWjJVdFlXTmpiM1Z1ZEMxc2FXNXJjeUlzSW5acFpYY3RjSEp2Wm1sc1pTSmRmWDBzSW5OamIzQmxJam9pYjNCbGJtbGtJR1Z0WVdsc0lIQnliMlpwYkdVaUxDSnBaR1Z1ZEdsMGVWOXdjbTkyYVdSbGNpSTZJbWRwZEdoMVlpSXNJbVZ0WVdsc1gzWmxjbWxtYVdWa0lqcDBjblZsTENKdVlXMWxJam9pUzJseWMzUmxiaUJTZFdkbElpd2laMmwwYUhWaVgybGtJam9pTVRRME1EUTVORFV5SWl3aWNISmxabVZ5Y21Wa1gzVnpaWEp1WVcxbElqb2lhMmx5YzNSbGJuSjFaMlZBWjIxaGFXd3VZMjl0SWl3aVoybDJaVzVmYm1GdFpTSTZJa3RwY25OMFpXNGlMQ0ptWVcxcGJIbGZibUZ0WlNJNklsSjFaMlVpTENKbGJXRnBiQ0k2SW10cGNuTjBaVzV5ZFdkbFFHZHRZV2xzTG1OdmJTSjkuS2ZZRXM2c3d0VWppVlNDSFNueWZ3SEx3akpsZGppTlZ0QXQxa2NYM0RtV1FrQXJyRFkzd3JkVFowRVpkcUQ5XzJ0eTl5UEFkVEFHaklzLWN1c1c3Z2pnM1lWR09ndGk2aVRKNno5NmFtU2VPU3I3VFlYVzYxZFYxUHpjWTQ5U3FxR3NNSEwteWpMbXhkT09uN3BfNXBVYnk0RGlaWmxQamNDQWNnaC1RNEstRXlVb25IWUM2cUdZZXhSTnNsX044Nk9MbFNYWWpNOFdHeklfRjA2OF9mdG56ZXk2ZVJLVWNrUWNjVE9EbmJuWUt4akJxU2V1V0gtTWZsMGtTSkNDUW1VVXNpZWFoOHM2UmlmUG4xbVloVTlhNnVQY2tyWWtMYWI1VnlNd25Ob0IyTjZHeTJSeVBYTWRWbmlvdHRqRjVTcEpUMnRBb0VJdXlmQmlfcG9ONHZRIiwicmVmcmVzaF90b2tlbiI6ImV5SmhiR2NpT2lKSVV6VXhNaUlzSW5SNWNDSWdPaUFpU2xkVUlpd2lhMmxrSWlBNklDSmhaV0ptTkRBMU9TMW1aREpqTFRRNE5qTXRZV0k0TVMwMU9ETmlaREl5WWpBM1lqWWlmUS5leUpsZUhBaU9qRTNOamt5TURJMU9EWXNJbWxoZENJNk1UYzJPRFU1T1RFM05Td2lhblJwSWpvaU0yRTJNR0l4TWpVdE1UVTNPQzAwTnpJd0xXRTFZV1l0WldJNE5ESmxabU0yWXpObUlpd2lhWE56SWpvaWFIUjBjSE02THk5aGRYUm9MbUZ3Y0M1aGJHd3RhR0Z1WkhNdVpHVjJMM0psWVd4dGN5OWhiR3hvWVc1a2N5SXNJbUYxWkNJNkltaDBkSEJ6T2k4dllYVjBhQzVoY0hBdVlXeHNMV2hoYm1SekxtUmxkaTl5WldGc2JYTXZZV3hzYUdGdVpITWlMQ0p6ZFdJaU9pSmxNemMyTlRNelpTMDBaalUyTFRSbU9HSXRZbU13WlMweU9EVTJaakJrTXpJNU5UQWlMQ0owZVhBaU9pSlNaV1p5WlhOb0lpd2lZWHB3SWpvaVlXeHNhR0Z1WkhNaUxDSnphV1FpT2lKbVkyWTFOekl4T0MxaE5UUTJMVFJsTlRRdE9EYzBaQzFsTnpJelptWmlOell4WW1JaUxDSnpZMjl3WlNJNkltOXdaVzVwWkNCbGJXRnBiQ0IzWldJdGIzSnBaMmx1Y3lCaFkzSWdjbTlzWlhNZ1ltRnphV01nY0hKdlptbHNaU0o5LnNmWnoxOWNQeW5fLWsxUVVMYm9PQVpYOEJsYjZPV2FRZUNjUEprejBWVDlmWmVYUENudlZ4LUFGbmY2VXZTX1VlWVlhenhPeERRbFNxRkl4UFBtYlN3IiwiYWNjZXB0ZWRfdG9zIjp0cnVlfQ.OXiqJb9mDCRVQc8_4prU59i8T9lJ16lv9s9sCMXvtSI"
+          },
+          "kind": "LookupSecret"
+        }
+      }
+    }
+  },
+  "kind": "ConversationStateUpdateEvent"
+}
