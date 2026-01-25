@@ -332,6 +332,84 @@ theorem toolCallsWellFormed_cons_noToolCalls_inv (m : ChatMessage) (rest : List 
   simp only [hno] at h
   exact h
 
+/-- If the first n elements have no tool calls, and the rest is well-formed, the whole is well-formed -/
+theorem toolCallsWellFormed_of_drop (msgs : List ChatMessage) (n : Nat)
+    (hNoTools : ∀ i (hi : i < n) (hlen : i < msgs.length), (msgs.get ⟨i, hlen⟩).toolCalls = none)
+    (hWf : toolCallsWellFormed (msgs.drop n) = true) :
+    toolCallsWellFormed msgs = true := by
+  induction msgs generalizing n with
+  | nil => simp [toolCallsWellFormed]
+  | cons m rest ih =>
+    cases n with
+    | zero => simp at hWf; exact hWf
+    | succ k =>
+      unfold toolCallsWellFormed
+      have hm : m.toolCalls = none := hNoTools 0 (Nat.zero_lt_succ k) (Nat.zero_lt_succ _)
+      simp only [hm]
+      apply ih k
+      · intro i hi hlen
+        have hlen' : i + 1 < (m :: rest).length := by simp; omega
+        have := hNoTools (i + 1) (by omega) hlen'
+        simp only [List.get_cons_succ] at this
+        exact this
+      · simp only [List.drop_succ_cons] at hWf
+        exact hWf
+
+/-- List.get after drop: (L.drop n).get ⟨i, h⟩ = L.get ⟨i + n, ...⟩ -/
+theorem get_drop (L : List α) (n i : Nat) (h : i < (L.drop n).length) :
+    (L.drop n).get ⟨i, h⟩ = L.get ⟨i + n, by simp [List.length_drop] at h; omega⟩ := by
+  induction n generalizing L i with
+  | zero => simp
+  | succ k ih =>
+    cases L with
+    | nil => simp at h
+    | cons x xs =>
+      simp only [List.drop_succ_cons, List.get_cons_succ]
+      have h' : i < (xs.drop k).length := by simp [List.length_drop] at h ⊢; omega
+      rw [ih xs i h']
+      congr 1
+      omega
+
+/-- Tool results matched by toolResultsMatch have role "tool" -/
+theorem toolResultsMatch_role (ids : List String) (msgs : List ChatMessage) (i : Nat)
+    (hMatch : toolResultsMatch ids msgs = true) (hi : i < ids.length) (hlen : i < msgs.length) :
+    (msgs.get ⟨i, hlen⟩).role = "tool" := by
+  induction ids generalizing msgs i with
+  | nil => simp at hi
+  | cons id restIds ih =>
+    cases msgs with
+    | nil => simp at hlen
+    | cons m rest =>
+      unfold toolResultsMatch at hMatch
+      simp only [Bool.and_eq_true, beq_iff_eq] at hMatch
+      cases i with
+      | zero => exact hMatch.1.1
+      | succ j =>
+        have hj : j < restIds.length := by simp at hi; omega
+        have hjlen : j < rest.length := by simp at hlen; omega
+        exact ih rest j hMatch.2 hj hjlen
+
+/-- If messagesProperlyFormed and role = "tool", then toolCalls = none -/
+theorem messagesProperlyFormed_tool_noToolCalls (msgs : List ChatMessage) (i : Nat)
+    (hProper : messagesProperlyFormed msgs = true) (hlen : i < msgs.length)
+    (hRole : (msgs.get ⟨i, hlen⟩).role = "tool") :
+    (msgs.get ⟨i, hlen⟩).toolCalls = none := by
+  induction msgs generalizing i with
+  | nil => simp at hlen
+  | cons m rest ih =>
+    unfold messagesProperlyFormed at hProper
+    simp only [Bool.and_eq_true, Bool.or_eq_true, bne_iff_ne, ne_eq] at hProper
+    cases i with
+    | zero =>
+      simp only [List.get_cons_zero] at hRole ⊢
+      cases hProper.1 with
+      | inl hne => exact absurd hRole hne
+      | inr heq => simp only [beq_iff_eq] at heq; exact heq
+    | succ j =>
+      simp only [List.get_cons_succ] at hRole ⊢
+      have hjlen : j < rest.length := by simp at hlen; omega
+      exact ih hProper.2 hjlen hRole
+
 /-- Helper: after processing tool results, the remainder is well-formed -/
 theorem toolCallsWellFormed_after_tools (m : ChatMessage) (rest : List ChatMessage)
     (h : toolCallsWellFormed (m :: rest) = true) :
@@ -377,12 +455,34 @@ theorem toolCallsWellFormed_drop (msgs : List ChatMessage) (n : Nat)
       let ⟨_, hWf⟩ := h
       let ids := extractToolCallIds tcs
       if hk : k < ids.length then
-        -- k < ids.length: rest.drop k still starts with tool results
+        -- k < ids.length: rest.drop k still starts with (ids.length - k) tool results
         -- These tool results have toolCalls = none by hProper
-        -- So toolCallsWellFormed recurses through them
-        -- This requires more detailed tracking of the tool results structure
-        -- For now, leave as sorry - the k ≥ ids.length case is the common one
-        sorry
+        -- After those, we have rest.drop ids.length which is well-formed by hWf
+        apply toolCallsWellFormed_of_drop (rest.drop k) (ids.length - k)
+        · -- Show first (ids.length - k) elements have no tool calls
+          intro i hi hlen
+          -- Position i in (rest.drop k) is position (i + k) in rest
+          have hik : i + k < ids.length := by omega
+          have hlenRest : i + k < rest.length := by
+            simp [List.length_drop] at hlen
+            omega
+          -- By toolResultsMatch_role, rest[i+k] has role "tool"
+          have hRole : (rest.get ⟨i + k, hlenRest⟩).role = "tool" :=
+            toolResultsMatch_role ids rest (i + k) h.1 hik hlenRest
+          -- By messagesProperlyFormed_tool_noToolCalls, it has toolCalls = none
+          have hNone : (rest.get ⟨i + k, hlenRest⟩).toolCalls = none :=
+            messagesProperlyFormed_tool_noToolCalls rest (i + k) hProperRest hlenRest hRole
+          -- Rewrite using get_drop
+          rw [get_drop rest k i hlen]
+          convert hNone using 2
+          omega
+        · -- Show (rest.drop k).drop (ids.length - k) is well-formed
+          have heq : (rest.drop k).drop (ids.length - k) = rest.drop ids.length := by
+            rw [List.drop_drop]
+            congr 1
+            omega
+          rw [heq]
+          exact hWf
       else
         -- k ≥ ids.length: dropped past all tool results
         have hge : ids.length ≤ k := Nat.not_lt.mp hk
