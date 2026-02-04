@@ -46,14 +46,18 @@ structure EnvConfig where
   apiKey : Option String
   baseUrl : Option String
 
-/-- Load config from .env file. -/
+/-- Load config from .env file and environment variables. -/
 def loadEnvConfig : IO EnvConfig := do
   let vars ← loadEnvFile
   let lookup key := vars.find? (·.1 == key) |>.map (·.2)
+  -- Check environment variables first, then fall back to .env file
+  let model ← IO.getEnv "LLM_MODEL"
+  let apiKey ← IO.getEnv "LLM_API_KEY"
+  let baseUrl ← IO.getEnv "LLM_BASE_URL"
   return {
-    model := lookup "LLM_MODEL"
-    apiKey := lookup "LLM_API_KEY"
-    baseUrl := lookup "LLM_BASE_URL"
+    model := model.orElse (fun _ => lookup "LLM_MODEL")
+    apiKey := apiKey.orElse (fun _ => lookup "LLM_API_KEY")
+    baseUrl := baseUrl.orElse (fun _ => lookup "LLM_BASE_URL")
   }
 
 /-! ## CLI Configuration -/
