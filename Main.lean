@@ -373,7 +373,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
   -- Run the agent loop manually (can't use runIO without proper IOOracles setup)
   let mut state := initialState
   let mut iteration := 0
-  while !state.isTerminal && iteration < cfg.maxSteps do
+  while !state.isTerminal && iteration < cfg.maxTurns do
     iteration := iteration + 1
     if cfg.verbose then
       IO.println s!"[Step {iteration}] Phase: {repr state.phase}"
@@ -431,7 +431,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
         }
     | .done _ => break
   -- Check if we hit step limit
-  if iteration ≥ cfg.maxSteps && !state.isTerminal then
+  if iteration ≥ cfg.maxTurns && !state.isTerminal then
     state := { state with phase := .done .stepLimitReached }
   let finalState := state
   IO.println s!"\nAgent completed."
