@@ -1,6 +1,6 @@
 {
   "name": "Lean 4 Development",
-  "image": "ghcr.io/leanprover/lean4:v4.26.0",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
       "installZsh": true,
@@ -29,13 +29,15 @@
     }
   },
   "containerEnv": {
-    "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}"
+    "LLM_API_KEY": "${localEnv:OPENAI_API_KEY",
+    "LLM_BASE_URL": "https://api.openai.com",
+    "LLM_MODEL": "gpt-5-mini"
   },
   "secrets": {
-    "OPENAI_API_KEY": {
-      "description": "OpenAI API key for running the ReAct agent. In GitHub Codespaces, configure this in your user secrets (Settings > Codespaces > Secrets). For local Dev Containers, set OPENAI_API_KEY in your local environment."
+    "LLM_API_KEY": {
+      "description": "API key for the LLM service. In GitHub Codespaces, configure this in your user secrets (Settings > Codespaces > Secrets). For local Dev Containers, set LLM_API_KEY in your local environment."
     }
   },
-  "postCreateCommand": "lake build",
+  "postCreateCommand": "curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none && echo 'source $HOME/.elan/env' >> ~/.bashrc && echo 'source $HOME/.elan/env' >> ~/.zshrc && . $HOME/.elan/env && lake build react-agent",
   "remoteUser": "vscode"
 }
