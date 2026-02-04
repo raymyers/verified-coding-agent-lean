@@ -46,14 +46,18 @@ structure EnvConfig where
   apiKey : Option String
   baseUrl : Option String
 
-/-- Load config from .env file. -/
+/-- Load config from .env file and environment variables. -/
 def loadEnvConfig : IO EnvConfig := do
   let vars ← loadEnvFile
   let lookup key := vars.find? (·.1 == key) |>.map (·.2)
+  -- Check environment variables first, then fall back to .env file
+  let model ← IO.getEnv "LLM_MODEL"
+  let apiKey ← IO.getEnv "LLM_API_KEY"
+  let baseUrl ← IO.getEnv "LLM_BASE_URL"
   return {
-    model := lookup "LLM_MODEL"
-    apiKey := lookup "LLM_API_KEY"
-    baseUrl := lookup "LLM_BASE_URL"
+    model := model.orElse (fun _ => lookup "LLM_MODEL")
+    apiKey := apiKey.orElse (fun _ => lookup "LLM_API_KEY")
+    baseUrl := baseUrl.orElse (fun _ => lookup "LLM_BASE_URL")
   }
 
 /-! ## CLI Configuration -/
@@ -373,7 +377,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
   -- Run the agent loop manually (can't use runIO without proper IOOracles setup)
   let mut state := initialState
   let mut iteration := 0
-  while !state.isTerminal && iteration < cfg.maxSteps do
+  while !state.isTerminal && iteration < cfg.maxTurns do
     iteration := iteration + 1
     if cfg.verbose then
       IO.println s!"[Step {iteration}] Phase: {repr state.phase}"
@@ -431,7 +435,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
         }
     | .done _ => break
   -- Check if we hit step limit
-  if iteration ≥ cfg.maxSteps && !state.isTerminal then
+  if iteration ≥ cfg.maxTurns && !state.isTerminal then
     state := { state with phase := .done .stepLimitReached }
   let finalState := state
   IO.println s!"\nAgent completed."
