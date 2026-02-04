@@ -1,0 +1,41 @@
+{
+  "name": "Lean 4 Development",
+  "image": "ghcr.io/leanprover/lean4:v4.26.0",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": true,
+      "installOhMyZsh": true,
+      "username": "vscode",
+      "userUid": "1000",
+      "userGid": "1000"
+    },
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "leanprover.lean4"
+      ],
+      "settings": {
+        "lean4.toolchainPath": "",
+        "editor.formatOnSave": true
+      }
+    },
+    "codespaces": {
+      "openFiles": [
+        "README.md"
+      ]
+    }
+  },
+  "containerEnv": {
+    "OPENAI_API_KEY": "${localEnv:OPENAI_API_KEY}"
+  },
+  "secrets": {
+    "OPENAI_API_KEY": {
+      "description": "OpenAI API key for running the ReAct agent. In GitHub Codespaces, configure this in your user secrets (Settings > Codespaces > Secrets). For local Dev Containers, set OPENAI_API_KEY in your local environment."
+    }
+  },
+  "postCreateCommand": "lake build",
+  "remoteUser": "vscode"
+}
