@@ -1,0 +1,43 @@
+{
+  "name": "Lean 4 Development",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": true,
+      "installOhMyZsh": true,
+      "username": "vscode",
+      "userUid": "1000",
+      "userGid": "1000"
+    },
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "leanprover.lean4"
+      ],
+      "settings": {
+        "lean4.toolchainPath": "",
+        "editor.formatOnSave": true
+      }
+    },
+    "codespaces": {
+      "openFiles": [
+        "README.md"
+      ]
+    }
+  },
+  "containerEnv": {
+    "LLM_API_KEY": "${localEnv:OPENAI_API_KEY",
+    "LLM_BASE_URL": "https://api.openai.com",
+    "LLM_MODEL": "gpt-5-mini"
+  },
+  "secrets": {
+    "LLM_API_KEY": {
+      "description": "API key for the LLM service. In GitHub Codespaces, configure this in your user secrets (Settings > Codespaces > Secrets). For local Dev Containers, set LLM_API_KEY in your local environment."
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/postCreateCommand.sh",
+  "remoteUser": "vscode"
+}

@@ -8,10 +8,12 @@ Requires [Lean 4](https://lean-lang.org/) and [Lake](https://github.com/leanprov
 
 ```bash
 # Build the project
-lake build
+lake build react-agent 
+
+export PATH=`pwd`/.lake/build/bin:"$PATH"
 
 # Run the agent (requires an OpenAI-compatible API)
-.lake/build/bin/react-agent --help
+react-agent --help
 ```
 
 ## Usage
