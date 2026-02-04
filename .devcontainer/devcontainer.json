@@ -38,6 +38,6 @@
       "description": "API key for the LLM service. In GitHub Codespaces, configure this in your user secrets (Settings > Codespaces > Secrets). For local Dev Containers, set LLM_API_KEY in your local environment."
     }
   },
-  "postCreateCommand": "curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none && echo 'source $HOME/.elan/env' >> ~/.bashrc && echo 'source $HOME/.elan/env' >> ~/.zshrc && . $HOME/.elan/env && lake build react-agent",
+  "postCreateCommand": "bash .devcontainer/postCreateCommand.sh",
   "remoteUser": "vscode"
 }
