@@ -15,17 +15,17 @@ open ReAct
 
 /-- Parse a single line from .env file. Returns (key, value) if valid. -/
 def parseEnvLine (line : String) : Option (String × String) :=
-  let line := line.trim
+  let line := line.trimAscii.toString
   if line.isEmpty || line.startsWith "#" then
     none
   else
     match line.splitOn "=" with
     | [key, value] =>
-        let key := key.trim
-        let value := value.trim
+        let key := key.trimAscii.toString
+        let value := value.trimAscii.toString
         -- Remove surrounding quotes if present
         let value := if value.startsWith "\"" && value.endsWith "\"" then
-          value.drop 1 |>.dropRight 1
+          ((value.toSlice.drop 1).dropEnd 1).toString
         else value
         some (key, value)
     | _ => none
@@ -248,7 +248,7 @@ def runChatMode (cfg : CLIConfig) : IO UInt32 := do
   repeat do
     IO.print "You: "
     let line ← stdin.getLine
-    let input := line.trim
+    let input := line.trimAscii.toString
     if input.isEmpty || input == "quit" || input == "exit" then
       break
     messages := messages ++ [LLM.ChatMessage.text "user" input]
@@ -287,6 +287,19 @@ def agentTools : List LLM.ToolFunction := [
       { name := "content", type := "string", description := "Content to write" }
     ]
     required := ["path", "content"] },
+  { name := "file_editor"
+    description := "Custom editing tool for viewing, creating and editing files. Commands: view (show file with line numbers or list directory), create (create new file), str_replace (find and replace exact string), insert (insert text after a line), undo_edit (revert last edit). Use absolute paths."
+    parameters := [
+      { name := "command", type := "string", description := "The command to run: view, create, str_replace, insert, undo_edit"
+        enumValues := some ["view", "create", "str_replace", "insert", "undo_edit"] },
+      { name := "path", type := "string", description := "Absolute path to file or directory" },
+      { name := "file_text", type := "string", description := "Required for create: content of the file to create" },
+      { name := "old_str", type := "string", description := "Required for str_replace: the exact string to replace" },
+      { name := "new_str", type := "string", description := "For str_replace: replacement string. For insert: string to insert" },
+      { name := "insert_line", type := "string", description := "Required for insert: line number after which to insert (0 for beginning)" },
+      { name := "view_range", type := "string", description := "For view: line range as 'start,end' e.g. '11,20'. Use -1 for end of file" }
+    ]
+    required := ["command", "path"] },
   { name := "submit"
     description := "Submit the final result and complete the task"
     parameters := [{ name := "result", type := "string", description := "The final result or answer" }]
@@ -315,6 +328,8 @@ def toolCallToAction (tc : LLM.ToolCall) : IO Action := do
       let path ← getToolArg tc.arguments "path"
       let content ← getToolArg tc.arguments "content"
       return .toolCall "write_file" s!"{path} {content}"
+  | "file_editor" =>
+      return .toolCall "file_editor" tc.arguments
   | "submit" =>
       let result ← getToolArg tc.arguments "result"
       return .submit result

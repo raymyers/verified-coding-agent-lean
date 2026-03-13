@@ -6,10 +6,29 @@ A formalized ReAct (Reasoning + Acting) agent implementation in Lean 4, with mat
 
 Requires [Lean 4](https://lean-lang.org/) and [Lake](https://github.com/leanprover/lake) (included with Lean).
 
-```bash
-# Build the project
-lake build
+### System Dependencies
 
+The [CurlLean](https://github.com/marcellop71/curl-lean) dependency requires `libcurl` and `zlog`:
+
+```bash
+# macOS
+brew install curl zlog
+
+# Ubuntu/Debian
+sudo apt-get install libcurl4-openssl-dev libzlog-dev
+```
+
+### Build
+
+On macOS with Homebrew, the compiler needs to find the zlog headers and libraries:
+
+```bash
+C_INCLUDE_PATH=/opt/homebrew/opt/zlog/include LIBRARY_PATH=/opt/homebrew/opt/zlog/lib lake build
+```
+
+On Linux (or if zlog is in standard paths), a plain `lake build` suffices.
+
+```bash
 # Run the agent (requires an OpenAI-compatible API)
 .lake/build/bin/react-agent --help
 ```

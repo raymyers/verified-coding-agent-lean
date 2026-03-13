@@ -12,7 +12,12 @@ maxSynthPendingDepth = 3
 [[require]]
 name = "mathlib"
 scope = "leanprover-community"
-rev = "v4.26.0"
+rev = "v4.27.0"
+
+[[require]]
+name = "curlLean"
+git = "https://github.com/marcellop71/curl-lean"
+rev = "main"
 
 [[lean_lib]]
 name = "ReActAgent"

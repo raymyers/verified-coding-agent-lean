@@ -1,10 +1,214 @@
 /-
 # Tool Executor
 
-Executes agent tools (bash, read_file, write_file) and returns observations.
+Executes agent tools (bash, read_file, write_file, file_editor) and returns observations.
 -/
 
+import Lean.Data.Json
+
 namespace Tools
+
+open Lean (Json)
+
+/-! ## File Editor Helpers -/
+
+/-- Format a line number with padding and tab. -/
+private def fmtLine (num : Nat) (line : String) : String :=
+  let pad := if num < 10 then "     " else if num < 100 then "    " else if num < 1000 then "   " else "  "
+  s!"{pad}{num}\t{line}"
+
+/-- Number lines starting from a given offset. -/
+private def numberLines (lines : List String) (startNum : Nat := 1) : List String :=
+  lines.zipIdx startNum |>.map fun (line, num) => fmtLine num line
+
+/-- Add line numbers to content (like `cat -n`). -/
+private def addLineNumbers (content : String) : String :=
+  let lines := content.splitOn "\n"
+  "\n".intercalate (numberLines lines)
+
+/-- Add line numbers to a range of lines (1-indexed, inclusive). -/
+private def addLineNumbersRange (content : String) (startLine endLine : Int) : Except String String := do
+  let lines := content.splitOn "\n"
+  let totalLines := lines.length
+  if totalLines == 0 then
+    return "(empty file)"
+  let startIdx := if startLine < 1 then 0 else startLine.toNat - 1
+  let endIdx := if endLine < 0 then totalLines - 1 else endLine.toNat - 1
+  if startIdx >= totalLines then
+    throw s!"Invalid view_range: start line {startLine} is beyond the file length ({totalLines} lines)"
+  let endIdx := min endIdx (totalLines - 1)
+  if startIdx > endIdx then
+    throw s!"Invalid view_range: start line {startLine} is after end line {endLine}"
+  let selectedLines := lines.drop startIdx |>.take (endIdx - startIdx + 1)
+  return "\n".intercalate (numberLines selectedLines (startIdx + 1))
+
+/-- View a file with line numbers or list a directory. -/
+private def fileView (path : String) (viewRange : Option (Int × Int)) : IO String := do
+  let pathObj : System.FilePath := path
+  let isDir ← pathObj.isDir
+  if isDir then
+    -- List directory (non-hidden, up to 2 levels)
+    let output ← IO.Process.output {
+      cmd := "find"
+      args := #[path, "-maxdepth", "2", "-not", "-name", ".*", "-not", "-path", "*/.*"]
+    }
+    return output.stdout
+  else
+    let result ← IO.FS.readFile path |>.toBaseIO
+    match result with
+    | .error e => return s!"Error reading file: {e}"
+    | .ok content =>
+      match viewRange with
+      | none => return addLineNumbers content
+      | some (startLine, endLine) =>
+        match addLineNumbersRange content startLine endLine with
+        | .ok s => return s
+        | .error e => return s!"Error: {e}"
+
+/-- Create a new file (only if it doesn't already exist). -/
+private def fileCreate (path : String) (fileText : String) : IO String := do
+  let pathObj : System.FilePath := path
+  let exists_ ← pathObj.pathExists
+  if exists_ then
+    return s!"Error: File already exists at: {path}. Cannot overwrite files using command `create`."
+  else
+    let result ← (IO.FS.writeFile path fileText) |>.toBaseIO
+    match result with
+    | .ok _ => return s!"File created successfully at: {path}"
+    | .error e => return s!"Error creating file: {e}"
+
+/-- Save backup before mutating a file. -/
+private def saveBackup (path : String) : IO Unit := do
+  let backupPath := path ++ ".file_editor_backup"
+  let content ← IO.FS.readFile path
+  IO.FS.writeFile backupPath content
+
+/-- Show a numbered snippet of lines around a region. -/
+private def showSnippet (path : String) (content : String) (around : Nat) (span : Nat) : String :=
+  let allLines := content.splitOn "\n"
+  let snippetStart := if around > 5 then around - 5 else 0
+  let snippetEnd := min (around + span + 5) allLines.length
+  let snippet := allLines.drop snippetStart |>.take (snippetEnd - snippetStart)
+  let snippetStr := "\n".intercalate (numberLines snippet (snippetStart + 1))
+  s!"The file {path} has been edited. Here's the result of running `cat -n` on a snippet of the edited file:\n{snippetStr}\n"
+
+/-- Replace an exact string in a file. Fails if not found or not unique. -/
+private def fileStrReplace (path : String) (oldStr newStr : String) : IO String := do
+  let result ← IO.FS.readFile path |>.toBaseIO
+  match result with
+  | .error e => return s!"Error reading file: {e}"
+  | .ok content =>
+    if oldStr == newStr then
+      return "Error: new_str and old_str must be different"
+    -- Count occurrences
+    let parts := content.splitOn oldStr
+    let count := parts.length - 1
+    if count == 0 then
+      return s!"Error: No match found for old_str in {path}. Make sure the old_str is an exact match of the content including whitespace."
+    if count > 1 then
+      return s!"Error: Found {count} matches for old_str in {path}. The old_str must uniquely identify a single location. Include more context to make it unique."
+    -- Exactly one match - save backup and replace
+    saveBackup path
+    let newContent := parts.head! ++ newStr ++ parts.tail!.head!
+    let writeResult ← (IO.FS.writeFile path newContent) |>.toBaseIO
+    match writeResult with
+    | .ok _ =>
+      let prefixLines := parts.head!.splitOn "\n"
+      let replacementStart := prefixLines.length
+      let newStrLineCount := (newStr.splitOn "\n").length
+      return showSnippet path newContent replacementStart newStrLineCount
+    | .error e => return s!"Error writing file: {e}"
+
+/-- Insert text after a given line number (0 = beginning of file). -/
+private def fileInsert (path : String) (insertLine : Nat) (newStr : String) : IO String := do
+  let result ← IO.FS.readFile path |>.toBaseIO
+  match result with
+  | .error e => return s!"Error reading file: {e}"
+  | .ok content =>
+    let lines := content.splitOn "\n"
+    if insertLine > lines.length then
+      return s!"Error: insert_line {insertLine} is beyond the file length ({lines.length} lines)"
+    saveBackup path
+    let before := lines.take insertLine
+    let after := lines.drop insertLine
+    let newLines := before ++ newStr.splitOn "\n" ++ after
+    let newContent := "\n".intercalate newLines
+    let writeResult ← (IO.FS.writeFile path newContent) |>.toBaseIO
+    match writeResult with
+    | .ok _ =>
+      let insertedLineCount := (newStr.splitOn "\n").length
+      return showSnippet path newContent insertLine insertedLineCount
+    | .error e => return s!"Error writing file: {e}"
+
+/-- Undo the last edit to a file by restoring from backup. -/
+private def fileUndoEdit (path : String) : IO String := do
+  let backupPath := path ++ ".file_editor_backup"
+  let backupObj : System.FilePath := backupPath
+  let exists_ ← backupObj.pathExists
+  if !exists_ then
+    return s!"Error: No edit history found for {path}"
+  else
+    let result ← IO.FS.readFile backupPath |>.toBaseIO
+    match result with
+    | .error e => return s!"Error reading backup: {e}"
+    | .ok content =>
+      let writeResult ← (IO.FS.writeFile path content) |>.toBaseIO
+      match writeResult with
+      | .ok _ =>
+        let removeResult ← (IO.FS.removeFile backupPath) |>.toBaseIO
+        match removeResult with
+        | .ok _ => return s!"Last edit to {path} undone successfully."
+        | .error _ => return s!"Last edit to {path} undone successfully (backup retained)."
+      | .error e => return s!"Error restoring file: {e}"
+
+/-- Parse view_range from string like "11,20" or "11,-1". -/
+private def parseViewRange (s : String) : Option (Int × Int) :=
+  match s.splitOn "," with
+  | [a, b] =>
+    match (a.trimAscii.toString.toInt?, b.trimAscii.toString.toInt?) with
+    | (some startVal, some endVal) => some (startVal, endVal)
+    | _ => none
+  | _ => none
+
+/-- Execute the file_editor tool with JSON arguments. -/
+private def executeFileEditor (argsStr : String) : IO String := do
+  match Json.parse argsStr with
+  | .error e => return s!"Error parsing file_editor arguments: {e}"
+  | .ok json =>
+    let command := json.getObjValAs? String "command" |>.toOption |>.getD ""
+    let path := json.getObjValAs? String "path" |>.toOption |>.getD ""
+    if path.isEmpty then
+      return "Error: 'path' is required for all file_editor commands"
+    match command with
+    | "view" =>
+      let viewRangeStr := json.getObjValAs? String "view_range" |>.toOption
+      let viewRange := viewRangeStr.bind parseViewRange
+      fileView path viewRange
+    | "create" =>
+      match json.getObjValAs? String "file_text" with
+      | .ok fileText => fileCreate path fileText
+      | .error _ => return "Error: 'file_text' is required for the create command"
+    | "str_replace" =>
+      match json.getObjValAs? String "old_str" with
+      | .ok oldStr =>
+        let newStr := json.getObjValAs? String "new_str" |>.toOption |>.getD ""
+        fileStrReplace path oldStr newStr
+      | .error _ => return "Error: 'old_str' is required for the str_replace command"
+    | "insert" =>
+      match json.getObjValAs? String "new_str" with
+      | .ok newStr =>
+        -- Try parsing insert_line as number from either int or string
+        let insertLine := (json.getObjValAs? Nat "insert_line" |>.toOption).orElse
+          fun _ => json.getObjValAs? String "insert_line" |>.toOption |>.bind (·.toNat?)
+        match insertLine with
+        | some line => fileInsert path line newStr
+        | none => return "Error: 'insert_line' (a number) is required for the insert command"
+      | .error _ => return "Error: 'new_str' is required for the insert command"
+    | "undo_edit" => fileUndoEdit path
+    | "" => return "Error: 'command' is required"
+    | other => return s!"Error: Unknown command '{other}'. Expected: view, create, str_replace, insert, undo_edit"
+
+/-! ## Main Executor -/
 
 /-- Execute a tool and return observation. -/
 def execute (workDir : String) (name : String) (args : String) : IO String := do
@@ -34,6 +238,7 @@ def execute (workDir : String) (name : String) (args : String) : IO String := do
           | .ok _ => return s!"Successfully wrote to {path}"
           | .error e => return s!"Error writing file: {e}"
       | _ => return "Error: write_file requires <path> <content>"
+  | "file_editor" => executeFileEditor args
   | _ => return s!"Unknown tool: {name}"
 
 end Tools
