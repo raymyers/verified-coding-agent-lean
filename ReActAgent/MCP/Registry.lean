@@ -35,14 +35,19 @@ def mcpPrefix : String := "mcp__"
 def qualifiedName (serverName toolName : String) : String :=
   s!"{mcpPrefix}{serverName}__{toolName}"
 
-/-- Parse a qualified name back to (serverName, toolName). Returns none if not an MCP name. -/
+/-- Parse a qualified name back to (serverName, toolName).
+    Splits on the FIRST `__` only, so tool names may contain `__`. -/
 def parseQualifiedName (name : String) : Option (String × String) :=
   if !name.startsWith mcpPrefix then none
   else
     let rest := (name.drop mcpPrefix.length).toString
+    -- Split on "__" then take first part as server, rejoin the rest as tool
     match rest.splitOn "__" with
-    | [server, tool] => some (server, tool)
-    | _ => none
+    | [] | [_] => none
+    | server :: toolParts =>
+      let tool := "__".intercalate toolParts
+      if server.isEmpty || tool.isEmpty then none
+      else some (server, tool)
 
 /-- Check if a tool name is an MCP-qualified name. -/
 def isMcpTool (name : String) : Bool := name.startsWith mcpPrefix

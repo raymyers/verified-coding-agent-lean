@@ -35,11 +35,14 @@ def getResult (msg : Message) : Except String Json :=
     .error s!"JSON-RPC error ({toJson code}): {errMsg}"
   | _ => .error "Expected a response message"
 
-/-- Extract the request ID from a response. -/
+/-- Extract the request ID from a response.
+    Rejects non-integer IDs (exponent must be 0). -/
 def getResponseId (msg : Message) : Option Nat :=
   match msg with
-  | .response (.num n) _ => some n.mantissa.toNat
-  | .responseError (.num n) _ _ _ => some n.mantissa.toNat
+  | .response (.num n) _ =>
+    if n.exponent == 0 && n.mantissa ≥ 0 then some n.mantissa.toNat else none
+  | .responseError (.num n) _ _ _ =>
+    if n.exponent == 0 && n.mantissa ≥ 0 then some n.mantissa.toNat else none
   | _ => none
 
 /-- Check if a message is a response (vs request/notification). -/

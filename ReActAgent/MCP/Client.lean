@@ -141,6 +141,12 @@ def McpClient.connect (cmd : String) (args : Array String)
   let protocolVersion ← match result.getObjValAs? String "protocolVersion" with
     | .ok v => pure v
     | .error _ => throw <| IO.userError "MCP: missing protocolVersion in initialize response"
+  -- Validate protocol version — spec says disconnect if unsupported
+  let supportedVersions := ["2025-03-26", "2024-11-05"]
+  if protocolVersion ∉ supportedVersions then
+    let _ ← transport.close
+    throw <| IO.userError s!"MCP: unsupported protocol version '{protocolVersion}' \
+      (supported: {supportedVersions})"
   let serverInfo ← match result.getObjVal? "serverInfo" >>= fromJson? with
     | .ok (si : ServerInfo) => pure si
     | .error e => throw <| IO.userError s!"MCP: invalid serverInfo: {e}"
@@ -151,15 +157,12 @@ def McpClient.connect (cmd : String) (args : Array String)
   transport.notify "notifications/initialized"
   return { transport, protocolVersion, serverInfo, capabilities }
 
-/-- List tools available on this server. -/
-def McpClient.listTools (c : McpClient) : IO (List McpTool) := do
-  let resp ← c.transport.request "tools/list"
-  let result ← match JsonRpc.getResult resp with
-    | .ok r => pure r
-    | .error e => throw <| IO.userError s!"MCP tools/list failed: {e}"
+/-- Parse tools from a tools/list result JSON. -/
+private def parseToolsResult (result : Json) : IO (List McpTool × Option String) := do
   let toolsJson ← match result.getObjVal? "tools" with
     | .ok j => pure j
-    | .error _ => return []
+    | .error _ => return ([], none)
+  let nextCursor := result.getObjValAs? String "nextCursor" |>.toOption
   match toolsJson with
   | .arr items =>
     let mut tools := []
@@ -167,8 +170,28 @@ def McpClient.listTools (c : McpClient) : IO (List McpTool) := do
       match fromJson? item with
       | .ok (t : McpTool) => tools := tools ++ [t]
       | .error e => throw <| IO.userError s!"MCP: invalid tool: {e}"
-    return tools
+    return (tools, nextCursor)
   | _ => throw <| IO.userError "MCP: tools field is not an array"
+
+/-- List all tools available on this server, following pagination cursors. -/
+def McpClient.listTools (c : McpClient) : IO (List McpTool) := do
+  let mut allTools : List McpTool := []
+  let mut cursor : Option String := none
+  -- Max 100 pages to prevent infinite loops
+  for _ in List.range 100 do
+    let params := match cursor with
+      | none => Json.mkObj []
+      | some cur => Json.mkObj [("cursor", toJson cur)]
+    let resp ← c.transport.request "tools/list" (some params)
+    let result ← match JsonRpc.getResult resp with
+      | .ok r => pure r
+      | .error e => throw <| IO.userError s!"MCP tools/list failed: {e}"
+    let (tools, nextCursor) ← parseToolsResult result
+    allTools := allTools ++ tools
+    match nextCursor with
+    | none => return allTools
+    | some cur => cursor := some cur
+  return allTools
 
 /-- Call a tool on this server. -/
 def McpClient.callTool (c : McpClient) (name : String) (arguments : Json) : IO ToolResult := do
