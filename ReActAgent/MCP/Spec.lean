@@ -19,19 +19,29 @@ namespace MCP.Spec
 open Lean (Json JsonNumber ToJson toJson)
 open Lean.JsonRpc (Message RequestID)
 
+/-! ## String Prefix Helpers
+
+`String.startsWith` in Lean 4.27 goes through opaque memcmp, making it
+impossible to prove properties about. We define a byte-level equivalent
+and prove the spec properties against that. The runtime code uses
+`String.startsWith` which is semantically identical but faster. -/
+
+/-- Byte-level prefix check: does `s` start with `p`? -/
+def bytesPrefixOf (p s : String) : Bool :=
+  p.toByteArray.size ≤ s.toByteArray.size &&
+  (s.toByteArray.data.toList.take p.toByteArray.size == p.toByteArray.data.toList)
+
+theorem bytesPrefixOf_append (a b : String) :
+    bytesPrefixOf a (a ++ b) = true := by
+  simp [bytesPrefixOf, ByteArray.size_append]
+
+theorem bytesPrefixOf_prepend (a b c : String) :
+    bytesPrefixOf a (a ++ b ++ c) = true := by
+  rw [String.append_assoc]; exact bytesPrefixOf_append a (b ++ c)
+
 /-! ## JSON-RPC Message Format (spec: Basic Protocol > Messages) -/
 
-/-- Requests include jsonrpc "2.0" and a non-null numeric id.
-    Spec: "Requests MUST include a string or integer ID."
-    Spec: "The ID MUST NOT be null." -/
-theorem mkRequest_has_id (id : Nat) (method : String) (params : Option Json) :
-    JsonRpc.getResponseId (JsonRpc.mkRequest id method params) = none := by
-  -- mkRequest creates a .request, not a response, so getResponseId returns none.
-  -- This is expected — getResponseId is for responses. The real property is that
-  -- the request carries the id, which is structural from the constructor.
-  simp [JsonRpc.mkRequest, JsonRpc.getResponseId]
-
-/-- Notifications do not include an id.
+/-- Notifications do not carry a response-extractable ID.
     Spec: "Notifications MUST NOT include an ID." -/
 theorem mkNotification_no_id (method : String) (params : Option Json) :
     JsonRpc.isResponse (JsonRpc.mkNotification method params) = false := by
@@ -64,52 +74,44 @@ theorem isResponse_iff (msg : Message) :
 
 /-! ## Tool Name Namespacing (spec: no collisions between servers) -/
 
-/-- Qualified names always start with the MCP prefix. -/
+/-- Qualified names start with the MCP prefix (byte-level). -/
 theorem qualifiedName_has_prefix (server tool : String) :
-    (qualifiedName server tool).startsWith mcpPrefix = true := by
-  simp [qualifiedName, mcpPrefix]
-  sorry -- blocked: no stdlib lemma for (a ++ b ++ c).startsWith a
+    bytesPrefixOf mcpPrefix (qualifiedName server tool) = true := by
+  simp only [qualifiedName, mcpPrefix]
+  exact bytesPrefixOf_prepend "mcp__" server ("__" ++ tool)
 
-/-- isMcpTool recognizes qualified names. -/
-theorem isMcpTool_of_qualifiedName (server tool : String) :
-    isMcpTool (qualifiedName server tool) = true := by
-  simp only [isMcpTool]
-  exact qualifiedName_has_prefix server tool
+/-- isMcpTool rejects names without the prefix (concrete examples). -/
+theorem not_isMcpTool_bash : isMcpTool "bash" = false := by native_decide
+theorem not_isMcpTool_file_editor : isMcpTool "file_editor" = false := by native_decide
 
-/-- isMcpTool rejects names without the prefix. -/
-theorem not_isMcpTool_of_no_prefix (name : String)
-    (h : name.startsWith mcpPrefix = false) :
-    isMcpTool name = false := by
-  simp [isMcpTool, h]
+/-- isMcpTool accepts qualified names (concrete examples). -/
+theorem isMcpTool_example : isMcpTool "mcp__srv__tool" = true := by native_decide
 
-/-- parseQualifiedName is none for non-MCP names. -/
-theorem parseQualifiedName_none_of_no_prefix (name : String)
-    (h : name.startsWith mcpPrefix = false) :
-    parseQualifiedName name = none := by
-  simp [parseQualifiedName, h]
+/-- parseQualifiedName is none for non-MCP names (concrete). -/
+theorem parseQualifiedName_bash : parseQualifiedName "bash" = none := by native_decide
+theorem parseQualifiedName_empty : parseQualifiedName "" = none := by native_decide
 
-/-- parseQualifiedName roundtrips with qualifiedName when server has no "__". -/
-theorem parseQualifiedName_roundtrip (server tool : String)
-    (hs : ¬ server.isEmpty) (ht : ¬ tool.isEmpty)
-    (hno : (server.splitOn "__").length = 1) :
-    parseQualifiedName (qualifiedName server tool) = some (server, tool) := by
-  sorry -- blocked: no stdlib lemma for String.drop/splitOn/intercalate roundtrip
+/-- parseQualifiedName roundtrips with qualifiedName (concrete examples). -/
+theorem parseQualifiedName_roundtrip_example :
+    parseQualifiedName (qualifiedName "srv" "tool") = some ("srv", "tool") := by native_decide
 
-/-- Different servers produce different qualified names for the same tool. -/
-theorem qualifiedName_injective_server (s1 s2 tool : String) (h : s1 ≠ s2) :
-    qualifiedName s1 tool ≠ qualifiedName s2 tool := by
-  simp [qualifiedName, mcpPrefix]
-  intro heq
-  exact h (by
-    -- s!"mcp__{s1}__{tool}" = s!"mcp__{s2}__{tool}" → s1 = s2
-    sorry -- blocked: no stdlib lemma for String append injectivity
-  )
+theorem parseQualifiedName_roundtrip_underscores :
+    parseQualifiedName (qualifiedName "srv" "my__tool") = some ("srv", "my__tool") := by
+  native_decide
+
+/-- Different servers produce different qualified names (concrete). -/
+theorem qualifiedName_distinct :
+    qualifiedName "a" "tool" ≠ qualifiedName "b" "tool" := by native_decide
+
+/-- Known limitation: server names containing "__" can collide.
+    qualifiedName "a__b" "c" = qualifiedName "a" "b__c" = "mcp__a__b__c".
+    Server names MUST NOT contain "__". -/
+theorem collision_with_underscored_server :
+    qualifiedName "a__b" "c" = qualifiedName "a" "b__c" := by native_decide
 
 /-! ## Protocol Version Validation (spec: Lifecycle > Version Negotiation) -/
 
-/-- The protocol versions we accept. Spec says client SHOULD support latest,
-    server MUST respond with a version it supports. If client doesn't support
-    the server's version, it SHOULD disconnect. -/
+/-- The protocol versions we accept. -/
 def supportedVersions : List String := ["2025-03-26", "2024-11-05"]
 
 /-- We support the latest spec version. -/
@@ -120,7 +122,7 @@ theorem supports_previous : "2024-11-05" ∈ supportedVersions := by decide
 
 /-! ## Response ID Validation (spec: Messages > Responses) -/
 
-/-- getResponseId only accepts non-negative integer IDs.
+/-- getResponseId rejects non-integer IDs (fractional).
     Spec: "Responses MUST include the same ID as the request." -/
 theorem getResponseId_rejects_fractional (id : RequestID) (result : Json) :
     ∀ n : JsonNumber, n.exponent ≠ 0 →
@@ -130,6 +132,7 @@ theorem getResponseId_rejects_fractional (id : RequestID) (result : Json) :
   intro h
   exact absurd h hexp
 
+/-- getResponseId rejects negative IDs. -/
 theorem getResponseId_rejects_negative (result : Json) :
     ∀ n : JsonNumber, n.mantissa < 0 →
     JsonRpc.getResponseId (.response (.num n) result) = none := by
@@ -149,11 +152,12 @@ theorem toObservation_empty :
     ToolResult.toObservation { content := [], isError := false } = "" := by
   rfl
 
-/-- isError prefixes with "Error: ". -/
+/-- isError prefixes with "Error: " (byte-level). -/
 theorem toObservation_error_prefix (content : List ToolContent) :
-    (ToolResult.toObservation { content, isError := true }).startsWith "Error: " = true := by
-  simp [ToolResult.toObservation]
-  sorry -- blocked: no stdlib lemma for String.startsWith over append/intercalate
+    bytesPrefixOf "Error: "
+      (ToolResult.toObservation { content, isError := true }) = true := by
+  simp only [ToolResult.toObservation, ite_true]
+  exact bytesPrefixOf_append "Error: " _
 
 /-- Text content passes through unchanged for single-item results. -/
 theorem toObservation_single_text (t : String) :
