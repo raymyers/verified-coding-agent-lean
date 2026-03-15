@@ -80,27 +80,9 @@ def mergeOnce (vocab : Vocab) (pieces : List Piece) : Option (List Piece) := do
   let (idx, _) ← findBestMerge candidates
   return applyMerge pieces idx
 
-/-- Repeatedly merge until no more merges possible -/
-partial def mergeAll (vocab : Vocab) (pieces : List Piece) : List Piece :=
-  match mergeOnce vocab pieces with
-  | none => pieces
-  | some pieces' => mergeAll vocab pieces'
-
 /-- Convert bytes to initial pieces (one byte each) -/
 def bytesToPieces (bytes : ByteArray) : List Piece :=
   bytes.toList.map fun b => ByteArray.mk #[b]
-
-/-- Encode bytes to token IDs -/
-def encode (vocab : Vocab) (input : ByteArray) : List TokenId :=
-  let pieces := bytesToPieces input
-  let merged := mergeAll vocab pieces
-  merged.filterMap vocab.lookup
-
-/-- Decode token IDs back to bytes -/
-def decode (vocab : Vocab) (tokens : List TokenId) : Option ByteArray :=
-  match tokens.mapM vocab.decode with
-  | none => none
-  | some pieces => some (pieces.foldl (· ++ ·) ByteArray.empty)
 
 /-! ## Properties -/
 
@@ -299,6 +281,26 @@ theorem mergeOnce_decreases (vocab : Vocab) (pieces pieces' : List Piece)
     rw [hlen]
     omega
 
+/-- Repeatedly merge until no more merges possible -/
+def mergeAll (vocab : Vocab) (pieces : List Piece) : List Piece :=
+  match h : mergeOnce vocab pieces with
+  | none => pieces
+  | some pieces' => mergeAll vocab pieces'
+termination_by pieces.length
+decreasing_by exact mergeOnce_decreases vocab pieces pieces' h
+
+/-- Encode bytes to token IDs -/
+def encode (vocab : Vocab) (input : ByteArray) : List TokenId :=
+  let pieces := bytesToPieces input
+  let merged := mergeAll vocab pieces
+  merged.filterMap vocab.lookup
+
+/-- Decode token IDs back to bytes -/
+def decode (vocab : Vocab) (tokens : List TokenId) : Option ByteArray :=
+  match tokens.mapM vocab.decode with
+  | none => none
+  | some pieces => some (pieces.foldl (· ++ ·) ByteArray.empty)
+
 /-! ## General Roundtrip Theorem -/
 
 /-- Concatenate all pieces into a single ByteArray -/
@@ -333,14 +335,53 @@ theorem applyMerge_concat (pieces : List Piece) (idx : Nat) :
 /-- mergeAll preserves concatenation -/
 theorem mergeAll_concat (vocab : Vocab) (pieces : List Piece) :
     concatPieces (mergeAll vocab pieces) = concatPieces pieces := by
-  sorry -- Follows from applyMerge_concat by induction on merge steps
+  exact aux vocab pieces.length pieces rfl
+where
+  aux (vocab : Vocab) : ∀ n (pieces : List Piece), pieces.length = n →
+      concatPieces (mergeAll vocab pieces) = concatPieces pieces := by
+    intro n
+    induction n using Nat.strongRecOn with
+    | _ n ih =>
+      intro pieces hlen
+      unfold mergeAll
+      split
+      · rfl
+      · next pieces' heq =>
+        have hdec := mergeOnce_decreases vocab pieces pieces' heq
+        rw [ih pieces'.length (by omega) pieces' rfl]
+        -- Goal: concatPieces pieces' = concatPieces pieces
+        simp only [mergeOnce] at heq
+        cases hbest : findBestMerge (findMergeablePairs vocab pieces) with
+        | none => simp [hbest] at heq
+        | some p =>
+          simp [hbest] at heq
+          rw [← heq]
+          exact applyMerge_concat pieces p.1
+
+private theorem toList_loop_spec (bs : ByteArray) (i : Nat) (r : List UInt8) :
+    ByteArray.toList.loop bs i r = r.reverse ++ (bs.data.toList.drop i) := by
+  induction i, r using ByteArray.toList.loop.induct bs with
+  | case1 i r hi ih =>
+    rw [ByteArray.toList.loop.eq_1, if_pos hi, ih]
+    have hlen : i < bs.data.toList.length := by rw [Array.length_toList]; exact hi
+    rw [List.reverse_cons, List.append_assoc, List.singleton_append]
+    congr 1
+    rw [List.drop_eq_getElem_cons hlen]
+    congr 1
+    simp only [ByteArray.get!]
+    rw [Array.getElem_toList hi]
+    exact getElem!_pos bs.data i hi
+  | case2 i r hi =>
+    rw [ByteArray.toList.loop.eq_1, if_neg hi]
+    have : bs.data.toList.length ≤ i := by rw [Array.length_toList]; exact Nat.not_lt.mp hi
+    rw [List.drop_of_length_le this]
+    simp [List.append_nil]
 
 /-- Helper: ByteArray.toList equals the underlying array's toList -/
 private theorem byteArray_toList_eq (bs : ByteArray) : bs.toList = bs.data.toList := by
-  -- The ByteArray.toList.loop correctly traverses all elements
-  -- This is verified by the implementation
   simp only [ByteArray.toList]
-  sorry -- The loop correctness requires detailed induction on ByteArray.toList.loop
+  rw [toList_loop_spec]
+  simp
 
 /-- bytesToPieces concatenates to the original -/
 theorem bytesToPieces_concat (input : ByteArray) :
@@ -371,23 +412,188 @@ theorem bytesToPieces_concat (input : ByteArray) :
   rw [byteArray_toList_eq]
   -- Goal: ByteArray.mk ⟨input.data.toList⟩ = input (which is rfl)
 
+/-- applyMerge.go preserves a predicate when the merged pair satisfies it -/
+private theorem applyMerge_go_forall (P : Piece → Prop) (idx i : Nat) :
+    ∀ (pieces : List Piece),
+    (∀ p ∈ pieces, P p) →
+    (∀ a b rest, i ≤ idx → List.drop (idx - i) pieces = a :: b :: rest →
+      P (mergePieces a b)) →
+    ∀ p ∈ applyMerge.go idx i pieces, P p := by
+  intro pieces hall hmerge p hp
+  induction pieces generalizing i p with
+  | nil => simp [applyMerge.go] at hp
+  | cons x xs ih =>
+    cases xs with
+    | nil => exact hall p (by simpa [applyMerge.go] using hp)
+    | cons y ys =>
+      simp only [applyMerge.go] at hp
+      split at hp
+      · -- i == idx
+        rename_i heq
+        have hi : i = idx := beq_iff_eq.mp heq
+        simp only [List.mem_cons] at hp
+        rcases hp with rfl | htail
+        · exact hmerge x y ys (by omega) (by simp [hi, Nat.sub_self])
+        · exact hall p (by simp; right; right; exact htail)
+      · -- i ≠ idx
+        rename_i hne
+        simp only [List.mem_cons] at hp
+        rcases hp with rfl | htail
+        · exact hall p (by simp)
+        · have hne' : i ≠ idx := fun h => hne (beq_iff_eq.mpr h)
+          exact ih (i + 1) (fun q hq => hall q (List.mem_cons_of_mem _ hq))
+            (fun a' b' rest' hle hdrop => by
+              apply hmerge a' b' rest' (by omega)
+              have : idx - i = (idx - (i + 1)) + 1 := by omega
+              rw [this, List.drop_succ_cons]
+              exact hdrop)
+            p htail
+
+/-- findMergeablePairs.go produces indices ≥ start -/
+private theorem findMergeablePairs_go_ge (vocab : Vocab) (start : Nat) (pieces : List Piece)
+    (idx : Nat) (rank : TokenId)
+    (hmem : (idx, rank) ∈ findMergeablePairs.go vocab start pieces) :
+    start ≤ idx := by
+  induction pieces generalizing start with
+  | nil => simp [findMergeablePairs.go] at hmem
+  | cons x xs ih =>
+    cases xs with
+    | nil => simp [findMergeablePairs.go] at hmem
+    | cons y ys =>
+      simp only [findMergeablePairs.go] at hmem
+      cases hlookup : vocab.lookup (mergePieces x y) with
+      | none =>
+        simp [hlookup] at hmem
+        exact Nat.le_of_succ_le (ih (start + 1) hmem)
+      | some r =>
+        simp [hlookup] at hmem
+        rcases hmem with ⟨h, _⟩ | htail
+        · omega
+        · exact Nat.le_of_succ_le (ih (start + 1) htail)
+
+/-- findMergeablePairs.go entries correspond to vocab lookups -/
+private theorem findMergeablePairs_go_lookup (vocab : Vocab) (start : Nat) (pieces : List Piece)
+    (idx : Nat) (rank : TokenId)
+    (hmem : (idx, rank) ∈ findMergeablePairs.go vocab start pieces) :
+    ∃ a b rest, List.drop (idx - start) pieces = a :: b :: rest ∧
+      vocab.lookup (mergePieces a b) = some rank := by
+  induction pieces generalizing start with
+  | nil => simp [findMergeablePairs.go] at hmem
+  | cons x xs ih =>
+    cases xs with
+    | nil => simp [findMergeablePairs.go] at hmem
+    | cons y ys =>
+      simp only [findMergeablePairs.go] at hmem
+      cases hlookup : vocab.lookup (mergePieces x y) with
+      | none =>
+        simp [hlookup] at hmem
+        have ⟨a, b, rest, hdrop, hlk⟩ := ih (start + 1) hmem
+        have hge := findMergeablePairs_go_ge vocab (start + 1) (y :: ys) idx rank hmem
+        exact ⟨a, b, rest, by rw [show idx - start = (idx - (start + 1)) + 1 from by omega,
+          List.drop_succ_cons]; exact hdrop, hlk⟩
+      | some r =>
+        simp [hlookup] at hmem
+        rcases hmem with ⟨hidx, hrk⟩ | htail
+        · subst hidx; subst hrk
+          exact ⟨x, y, ys, by simp [Nat.sub_self], hlookup⟩
+        · have ⟨a, b, rest, hdrop, hlk⟩ := ih (start + 1) htail
+          have hge := findMergeablePairs_go_ge vocab (start + 1) (y :: ys) idx rank htail
+          exact ⟨a, b, rest, by rw [show idx - start = (idx - (start + 1)) + 1 from by omega,
+            List.drop_succ_cons]; exact hdrop, hlk⟩
+
+/-- mergeOnce preserves the property that all pieces have vocab lookups -/
+private theorem mergeOnce_preserves_lookup (vocab : Vocab) (pieces pieces' : List Piece)
+    (hall : ∀ p ∈ pieces, ∃ tid, vocab.lookup p = some tid)
+    (h : mergeOnce vocab pieces = some pieces') :
+    ∀ p ∈ pieces', ∃ tid, vocab.lookup p = some tid := by
+  simp only [mergeOnce] at h
+  cases hbest : findBestMerge (findMergeablePairs vocab pieces) with
+  | none => simp [hbest] at h
+  | some pair =>
+    simp [hbest] at h
+    rw [← h]
+    apply applyMerge_go_forall (fun p => ∃ tid, vocab.lookup p = some tid) pair.1 0 pieces hall
+    intro a b rest _ hdrop
+    have hmem := findBestMerge_mem _ _ hbest
+    have ⟨a', b', rest', hdrop', hlk⟩ :=
+      findMergeablePairs_go_lookup vocab 0 pieces pair.1 pair.2 hmem
+    simp only [Nat.sub_zero] at hdrop hdrop'
+    rw [hdrop] at hdrop'
+    have := List.cons.inj hdrop'
+    rw [this.1, (List.cons.inj this.2).1]
+    exact ⟨pair.2, hlk⟩
+
+/-- Helper: bytesToPieces creates single-byte pieces -/
+theorem bytesToPieces_size_one (input : ByteArray) :
+    ∀ p ∈ bytesToPieces input, p.size = 1 := by
+  intro p hp
+  simp only [bytesToPieces, List.mem_map] at hp
+  obtain ⟨b, _, rfl⟩ := hp
+  rfl
+
 /-- For well-formed vocab, all final pieces have token IDs -/
 theorem mergeAll_lookup_some (vocab : Vocab) (hw : vocab.WellFormed) (pieces : List Piece)
     (hinit : ∀ p ∈ pieces, p.size = 1) :
     ∀ p ∈ mergeAll vocab pieces, ∃ tid, vocab.lookup p = some tid := by
-  sorry -- Induction: either piece is single byte (covered) or result of merge (was in vocab)
+  -- Generalize: use invariant "all pieces have lookup" instead of "all size 1"
+  suffices hinv : ∀ p ∈ pieces, ∃ tid, vocab.lookup p = some tid by
+    exact mergeAll_lookup_some_aux vocab pieces.length pieces rfl hinv
+  -- Initial condition: single-byte pieces have lookup by covers_bytes
+  intro p hp
+  have hsize := hinit p hp
+  -- p has size 1, so it's a single byte
+  have ⟨b, hb⟩ : ∃ b : UInt8, p = ByteArray.mk #[b] := by
+    cases p with | mk arr =>
+    cases arr with | mk lst =>
+    unfold ByteArray.size Array.size at hsize
+    match lst with
+    | [b] => exact ⟨b, rfl⟩
+    | [] => simp at hsize
+    | _ :: _ :: _ => simp only [List.length_cons] at hsize; omega
+  rw [hb]; exact hw.covers_bytes b
+where
+  mergeAll_lookup_some_aux (vocab : Vocab) :
+      ∀ n (pieces : List Piece), pieces.length = n →
+      (∀ p ∈ pieces, ∃ tid, vocab.lookup p = some tid) →
+      ∀ p ∈ mergeAll vocab pieces, ∃ tid, vocab.lookup p = some tid := by
+    intro n
+    induction n using Nat.strongRecOn with
+    | _ n ih =>
+      intro pieces hlen hall
+      unfold mergeAll
+      split
+      · exact hall
+      · next pieces' heq =>
+        have hdec := mergeOnce_decreases vocab pieces pieces' heq
+        exact ih pieces'.length (by omega) pieces' rfl
+          (mergeOnce_preserves_lookup vocab pieces pieces' hall heq)
+
+/-- filterMap lookup then mapM decode recovers the original pieces -/
+private theorem filterMap_mapM_roundtrip (vocab : Vocab)
+    (hdec : ∀ piece tid, vocab.lookup piece = some tid → vocab.decode tid = some piece)
+    (pieces : List Piece)
+    (hall : ∀ p ∈ pieces, ∃ tid, vocab.lookup p = some tid) :
+    (pieces.filterMap vocab.lookup).mapM vocab.decode = some pieces := by
+  induction pieces with
+  | nil => rfl
+  | cons p ps ih =>
+    have ⟨tid, hlk⟩ := hall p (by simp)
+    simp only [List.filterMap_cons, hlk, List.mapM_cons]
+    rw [hdec p tid hlk, ih (fun q hq => hall q (List.mem_cons_of_mem _ hq))]
+    rfl
 
 /-- General roundtrip theorem for well-formed vocabularies -/
 theorem encode_decode_roundtrip (vocab : Vocab) (hw : vocab.WellFormed) (input : ByteArray) :
     decode vocab (encode vocab input) = some input := by
   simp only [encode, decode]
-  -- Key steps:
-  -- 1. bytesToPieces creates single-byte pieces
-  -- 2. mergeAll preserves concatenation
-  -- 3. For well-formed vocab, all merged pieces have tokens
-  -- 4. decode inverts lookup, so we get back the pieces
-  -- 5. Pieces concatenate to original input
-  sorry
+  have hmerged := mergeAll_lookup_some vocab hw (bytesToPieces input) (bytesToPieces_size_one input)
+  rw [filterMap_mapM_roundtrip vocab hw.decode_inv _ hmerged]
+  -- Goal: some (foldl (++) empty (mergeAll ...)) = some input
+  simp only [Option.some.injEq]
+  -- This is concatPieces (mergeAll vocab (bytesToPieces input)) = input
+  have : concatPieces (mergeAll vocab (bytesToPieces input)) = input := by
+    rw [mergeAll_concat]; exact bytesToPieces_concat input
+  exact this
 
 /-! ## Test Vocabulary: Base bytes only -/
 
@@ -470,14 +676,6 @@ theorem baseVocab_no_merges (pieces : List Piece)
         | inr hp' => exact h p (List.mem_cons_of_mem _ (List.mem_cons_of_mem _ hp'))
   exact hgo 0
 
-/-- Helper: bytesToPieces creates single-byte pieces -/
-theorem bytesToPieces_size_one (input : ByteArray) :
-    ∀ p ∈ bytesToPieces input, p.size = 1 := by
-  intro p hp
-  simp only [bytesToPieces, List.mem_map] at hp
-  obtain ⟨b, _, rfl⟩ := hp
-  rfl
-
 /-- Helper: mergeOnce returns none when no merges are possible -/
 theorem baseVocab_mergeOnce_none (pieces : List Piece) (h : ∀ p ∈ pieces, p.size = 1) :
     mergeOnce baseVocab pieces = none := by
@@ -495,12 +693,51 @@ theorem baseVocab_encode (input : ByteArray) :
   -- 1. bytesToPieces creates single-byte pieces
   -- 2. With baseVocab, mergeOnce returns none, so mergeAll is identity
   -- 3. Each byte b maps via baseVocab.lookup to some b.toNat
-  sorry -- Requires equation lemma for partial mergeAll
+  -- mergeAll is identity since no merges are possible
+  have hsize : ∀ p ∈ (input.toList.map fun b => ByteArray.mk #[b]), p.size = 1 := by
+    intro p hp; simp only [List.mem_map] at hp; obtain ⟨_, _, rfl⟩ := hp; rfl
+  have hmerge : mergeOnce baseVocab (input.toList.map fun b => ByteArray.mk #[b]) = none :=
+    baseVocab_mergeOnce_none _ hsize
+  have hid : mergeAll baseVocab (input.toList.map fun b => ByteArray.mk #[b]) =
+      input.toList.map fun b => ByteArray.mk #[b] := by
+    unfold mergeAll; split
+    · rfl
+    · next heq => simp [hmerge] at heq
+  rw [hid]
+  -- Now: filterMap baseVocab.lookup (map ...) = map (·.toNat) ...
+  simp only [List.filterMap_map]
+  induction input.toList with
+  | nil => rfl
+  | cons b bs ih =>
+    simp only [List.map_cons, List.filterMap_cons, Function.comp]
+    have hlookup : baseVocab.lookup (ByteArray.mk #[b]) = some b.toNat := rfl
+    rw [hlookup]
+    exact congrArg _ ih
 
-/-- Base vocab decode inverts encode (follows from general theorem) -/
+/-- mapM baseVocab.decode on encoded byte values reconstructs bytesToPieces -/
+private theorem baseVocab_mapM_decode (bytes : List UInt8) :
+    (bytes.map (·.toNat)).mapM baseVocab.decode =
+    some (bytes.map fun b => ByteArray.mk #[b]) := by
+  induction bytes with
+  | nil => rfl
+  | cons b bs ih =>
+    simp only [List.map_cons, List.mapM_cons]
+    show (baseVocab.decode b.toNat).bind (fun a =>
+      ((List.map (·.toNat) bs).mapM baseVocab.decode).bind (fun bs' =>
+        some (a :: bs'))) = _
+    have hb : baseVocab.decode b.toNat = some (ByteArray.mk #[b]) := by
+      simp [baseVocab, UInt8.toNat_lt, UInt8.ofNat_toNat, b.toNat_lt]
+    rw [hb, ih, Option.bind_some, Option.bind_some]
+
+/-- Base vocab decode inverts encode -/
 theorem baseVocab_roundtrip (input : ByteArray) :
-    decode baseVocab (encode baseVocab input) = some input :=
-  encode_decode_roundtrip baseVocab baseVocab_wellFormed input
+    decode baseVocab (encode baseVocab input) = some input := by
+  rw [baseVocab_encode]
+  simp only [decode, baseVocab_mapM_decode]
+  -- Now goal: some (foldl (++) empty (map ...)) = some input
+  -- This is exactly bytesToPieces_concat
+  congr 1
+  exact bytesToPieces_concat input
 
 /-! ## Example: Tiny vocabulary with one merge -/
 
