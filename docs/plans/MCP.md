@@ -13,16 +13,14 @@ discover and invoke tools hosted by external MCP servers over stdio transport.
 
 Standalone JSON-RPC 2.0 over stdio — no MCP-specific logic yet.
 
-- [ ] Define `JsonRpc.Request` structure: `jsonrpc`, `id` (Nat), `method` (String), `params` (Option Json)
-- [ ] Define `JsonRpc.Response` structure: `jsonrpc`, `id`, `result` (Option Json), `error` (Option ErrorObj)
-- [ ] Define `JsonRpc.Notification` structure: `jsonrpc`, `method`, `params` (Option Json)
-- [ ] Define `JsonRpc.ErrorObj`: `code` (Int), `message` (String), `data` (Option Json)
-- [ ] Implement `JsonRpc.Request.toJson` and `JsonRpc.Response.fromJson`
-- [ ] Implement `JsonRpc.Notification.toJson`
-- [ ] Create `StdioTransport` that wraps a child process handle:
-  - [ ] `send (msg : Json) : IO Unit` — write JSON + newline to child stdin
-  - [ ] `recv : IO Json` — read one newline-delimited JSON from child stdout
-- [ ] Implement monotonic request ID counter in `StdioTransport`
+- [x] Re-use `Lean.Data.JsonRpc.Message` (Request, Response, Notification, ErrorCode)
+- [x] Add MCP helpers: `mkRequest`, `mkNotification`, `getResult`, `getResponseId`, `isResponse`
+- [x] Create `StdioTransport` that wraps a child process handle:
+  - [x] `send (msg : Message) : IO Unit` — write JSON + newline to child stdin
+  - [x] `recv : IO Message` — read one newline-delimited JSON from child stdout
+- [x] Implement monotonic request ID counter in `StdioTransport`
+- [x] `request` method: send request, skip interleaved notifications, return matching response
+- [x] `notify` method: send notification (no response expected)
 - [ ] Write `#eval` tests: round-trip serialize/deserialize for each message type
 
 **Tested deliverable**: Can send a JSON-RPC request to a subprocess and read a JSON-RPC response back. Verified with a trivial echo server script.
@@ -33,49 +31,49 @@ Standalone JSON-RPC 2.0 over stdio — no MCP-specific logic yet.
 
 Implement the MCP handshake on top of the transport.
 
-- [ ] Define `McpClient.ClientCapabilities` — empty struct (we advertise no client caps for now)
-- [ ] Define `McpClient.ServerCapabilities` — `tools : Option ToolsCap` where `ToolsCap` has `listChanged : Bool`
-- [ ] Define `McpClient.ServerInfo` — `name : String`, `version : String`
-- [ ] Implement `McpClient.initialize`:
-  - [ ] Send `initialize` request with `protocolVersion = "2025-03-26"`, `clientInfo`, `capabilities = {}`
-  - [ ] Parse response: extract `protocolVersion`, `capabilities`, `serverInfo`
-  - [ ] Validate protocol version matches (disconnect if mismatch)
-  - [ ] Send `notifications/initialized` notification
-- [ ] Implement `McpClient.shutdown`: close child stdin, wait/SIGTERM/SIGKILL
-- [ ] Define `McpClient` state structure holding transport + negotiated capabilities + server info
-- [ ] Implement `McpClient.connect (cmd : String) (args : Array String) : IO McpClient`
-  - [ ] Spawn subprocess, create transport, run initialize handshake, return connected client
-- [ ] Implement `McpClient.disconnect : IO Unit`
+- [x] Define `ServerCapabilities` — `tools : Option ToolsCap` where `ToolsCap` has `listChanged : Bool`
+- [x] Define `ServerInfo` — `name : String`, `version : String`
+- [x] Implement `McpClient.connect`:
+  - [x] Spawn subprocess, create transport
+  - [x] Send `initialize` request with `protocolVersion = "2025-03-26"`, `clientInfo`, `capabilities = {}`
+  - [x] Parse response: extract `protocolVersion`, `capabilities`, `serverInfo`
+  - [x] Send `notifications/initialized` notification
+  - [x] Return connected `McpClient`
+- [x] Implement `McpClient.disconnect`: close child stdin, wait for process
+- [ ] Test: connect to an MCP server, print server info, cleanly shut down
 
-**Tested deliverable**: `McpClient.connect` launches an MCP server (e.g. `npx @modelcontextprotocol/server-everything`), completes handshake, prints server info, then cleanly shuts down.
+**Tested deliverable**: `McpClient.connect` launches an MCP server, completes handshake, prints server info, then cleanly shuts down.
 
 ---
 
 ## Milestone 3: Tool Discovery (tools/list)
 
-- [ ] Define `McpTool` structure: `name : String`, `description : String`, `inputSchema : Json`
-- [ ] Implement `McpClient.listTools : IO (List McpTool)`
-  - [ ] Send `tools/list` request (no pagination for v1)
-  - [ ] Parse response: extract `tools` array, map to `McpTool`
+- [x] Define `McpTool` structure: `name : String`, `description : String`, `inputSchema : Json`
+- [x] Implement `McpClient.listTools : IO (List McpTool)`
+  - [x] Send `tools/list` request
+  - [x] Parse response: extract `tools` array, map to `McpTool`
 - [ ] Implement `McpClient.listToolsAll : IO (List McpTool)` with cursor-based pagination
   - [ ] Loop while `nextCursor` is present
+- [ ] Test: connect, list tools, print name + description for each
 
-**Tested deliverable**: Connect to an MCP server, list its tools, print name + description for each. Verify against known server that exposes tools.
+**Tested deliverable**: Connect to an MCP server, list its tools, print name + description for each.
 
 ---
 
 ## Milestone 4: Tool Invocation (tools/call)
 
-- [ ] Define `ToolContent` inductive: `text (t : String)` | `image (data : String) (mime : String)` | `resource (uri : String) (text : String)`
-- [ ] Define `ToolResult` structure: `content : List ToolContent`, `isError : Bool`
-- [ ] Implement `McpClient.callTool (name : String) (arguments : Json) : IO ToolResult`
-  - [ ] Send `tools/call` request with `name` and `arguments`
-  - [ ] Parse response: extract `content` array and `isError`
-  - [ ] Map content items to `ToolContent` values
-  - [ ] Handle JSON-RPC error responses (throw or return error)
+- [x] Define `ToolContent` inductive: `text` | `image` | `audio` | `resource`
+- [x] Define `ToolResult` structure: `content : List ToolContent`, `isError : Bool`
+- [x] Implement `McpClient.callTool (name : String) (arguments : Json) : IO ToolResult`
+  - [x] Send `tools/call` request with `name` and `arguments`
+  - [x] Parse response: extract `content` array and `isError`
+  - [x] Map content items to `ToolContent` values
+  - [x] Handle JSON-RPC error responses (throw)
+- [x] Implement `ToolResult.toObservation` — render to plain string
 - [ ] Add timeout support: configurable per-call timeout with cancellation
+- [ ] Test: call a tool, verify success and isError cases
 
-**Tested deliverable**: Call a tool on a live MCP server, receive and display the text result. Test both success and `isError: true` cases.
+**Tested deliverable**: Call a tool on a live MCP server, receive and display the text result.
 
 ---
 
@@ -83,20 +81,20 @@ Implement the MCP handshake on top of the transport.
 
 Bridge between MCP servers and the agent's tool system.
 
-- [ ] Define `McpToolRegistry` that manages multiple `McpClient` connections
-  - [ ] `addServer (name : String) (cmd : String) (args : Array String) : IO Unit`
-  - [ ] `removeServer (name : String) : IO Unit`
-  - [ ] `allTools : IO (List (String × McpTool))` — returns `(serverName, tool)` pairs
-- [ ] Convert `McpTool` to the agent's `LLM.Tool` schema format:
-  - [ ] `McpTool.toLLMTool (serverPrefix : String) : LLM.Tool`
-  - [ ] Namespace tool names: `"mcp__serverName__toolName"` to avoid collisions
-- [ ] Implement `McpToolRegistry.execute (qualifiedName : String) (argsJson : String) : IO String`
-  - [ ] Parse qualified name to extract server + tool
-  - [ ] Parse args JSON
-  - [ ] Call `McpClient.callTool`
-  - [ ] Render `ToolResult` to observation string (concatenate text content, note errors)
+- [x] Define `McpToolRegistry` that manages multiple `McpClient` connections
+  - [x] `addServer` — connect and list tools
+  - [x] `removeServer` — disconnect and remove
+  - [x] `allTools` — returns `(qualifiedName, McpTool)` pairs
+- [x] Namespace tool names: `"mcp__serverName__toolName"` via `qualifiedName`/`parseQualifiedName`
+- [x] Implement `McpToolRegistry.execute (qualifiedName : String) (argsJson : String) : IO String`
+  - [x] Parse qualified name to extract server + tool
+  - [x] Parse args JSON
+  - [x] Call `McpClient.callTool`
+  - [x] Render `ToolResult` to observation string
+- [x] `disconnectAll` — clean shutdown of all servers
+- [ ] Test: registry with one server, `allTools` returns tools, `execute` returns output
 
-**Tested deliverable**: Registry with one server. `allTools` returns `LLM.Tool` list. `execute "mcp__srv__toolName" args` returns the tool's text output.
+**Tested deliverable**: Registry with one server. `execute "mcp__srv__toolName" args` returns the tool's text output.
 
 ---
 
@@ -104,19 +102,20 @@ Bridge between MCP servers and the agent's tool system.
 
 Wire MCP tools into the ReAct agent loop so the LLM can discover and call them.
 
-- [ ] Extend agent config to accept MCP server specifications: `mcpServers : List McpServerConfig`
-  - [ ] `McpServerConfig`: `name`, `command`, `args`, `env` (optional)
-- [ ] On agent startup (`runAgent`):
-  - [ ] Connect to all configured MCP servers
-  - [ ] Collect their tools via `allTools`
-  - [ ] Merge with built-in tools into the `LLM.Tool` list sent to the model
-- [ ] Extend `toolCallToAction` to recognize `mcp__*` prefixed tool names:
-  - [ ] Route to `McpToolRegistry.execute` instead of `Tools.execute`
-- [ ] Extend `Tools.execute` (or add parallel path) for MCP tool dispatch
-- [ ] On agent shutdown: disconnect all MCP clients
+- [x] Add `mcpServers : List McpServerConfig` to `CLIConfig`
+- [x] On agent startup (`runReactMode`):
+  - [x] Connect to all configured MCP servers via registry
+  - [x] Collect their tools via `allTools`
+  - [x] Convert `McpTool` → `LLM.ToolFunction` via `mcpToolToLLM`
+  - [x] Merge with built-in tools into the tool list sent to the model
+- [x] Extend `toolCallToAction` to recognize `mcp__*` prefixed tool names
+- [x] Route MCP tool calls through `McpToolRegistry.execute` in the agent loop
+- [x] On agent shutdown: `mcpRegistry.disconnectAll`
+- [ ] CLI flag to specify MCP servers (e.g. `--mcp-server name:command:args`)
 - [ ] Handle MCP server crashes gracefully: catch IO errors, report as tool error observation
+- [ ] End-to-end test with a real MCP server
 
-**Tested deliverable**: Full end-to-end: configure agent with an MCP server, agent receives a task, LLM sees MCP tools in its tool list, calls one, gets result back, uses it to complete the task.
+**Tested deliverable**: Full end-to-end: configure agent with an MCP server, LLM sees MCP tools, calls one, gets result back.
 
 ---
 
@@ -138,7 +137,7 @@ Wire MCP tools into the ReAct agent loop so the LLM can discover and call them.
 ```
 ReActAgent/
   MCP/
-    JsonRpc.lean        -- Milestone 1: JSON-RPC types and serialization
+    JsonRpc.lean        -- Milestone 1: JSON-RPC helpers on top of Lean.Data.JsonRpc
     Transport.lean      -- Milestone 1: StdioTransport (spawn + read/write)
     Client.lean         -- Milestones 2-4: McpClient (lifecycle + tools/list + tools/call)
     Registry.lean       -- Milestone 5: McpToolRegistry (multi-server, name mapping)

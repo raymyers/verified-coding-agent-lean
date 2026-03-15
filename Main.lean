@@ -8,6 +8,7 @@ Supports multiple modes for testing: prompt, chat, react.
 import ReActAgent.ReActExecutable
 import ReActAgent.LLM
 import ReActAgent.Tools
+import ReActAgent.MCP
 
 open ReAct
 
@@ -84,7 +85,7 @@ structure CLIConfig where
   headless : Bool
   workDir : String
   verbose : Bool
-  deriving Repr
+  mcpServers : List MCP.McpServerConfig := []
 
 /-- Default configuration (without env). -/
 def CLIConfig.default : CLIConfig := {
@@ -270,7 +271,25 @@ TASK: {task}
 
 Use the provided tools to accomplish the task. When finished, call the submit tool with your result."
 
-/-- Tool definitions for the agent. -/
+/-- Convert an MCP tool to an LLM tool function definition.
+    The tool name is qualified as mcp__<server>__<tool>. -/
+def mcpToolToLLM (serverName : String) (tool : MCP.McpTool) : LLM.ToolFunction :=
+  -- The inputSchema from MCP is already a JSON Schema object.
+  -- We extract property names for a best-effort parameter list.
+  let props := tool.inputSchema.getObjVal? "properties" |>.toOption
+  let required := tool.inputSchema.getObjValAs? (List String) "required" |>.toOption |>.getD []
+  let params : List LLM.ToolParam := match props with
+    | some (.obj m) => m.toList.map fun (name, schema) =>
+      { name
+        type := schema.getObjValAs? String "type" |>.toOption |>.getD "string"
+        description := schema.getObjValAs? String "description" |>.toOption |>.getD "" }
+    | _ => []
+  { name := MCP.qualifiedName serverName tool.name
+    description := tool.description
+    parameters := params
+    required }
+
+/-- Built-in tool definitions for the agent. -/
 def agentTools : List LLM.ToolFunction := [
   { name := "bash"
     description := "Execute a shell command"
@@ -361,6 +380,9 @@ def getToolArg (args : String) (key : String) : IO String := do
 
 /-- Convert a tool call to an Action. -/
 def toolCallToAction (tc : LLM.ToolCall) : IO Action := do
+  -- Check for MCP-namespaced tools first
+  if MCP.isMcpTool tc.name then
+    return .toolCall tc.name tc.arguments
   match tc.name with
   | "bash" =>
       let cmd ← getToolArg tc.arguments "command"
@@ -461,6 +483,26 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
     model := cfg.model
     apiKey := cfg.apiKey
   }
+  -- Connect to MCP servers and collect their tools
+  let mcpRegistry ← MCP.McpToolRegistry.create
+  let mut mcpToolDefs : List LLM.ToolFunction := []
+  for serverCfg in cfg.mcpServers do
+    try
+      mcpRegistry.addServer serverCfg
+      if cfg.verbose then
+        IO.println s!"Connected to MCP server: {serverCfg.name}"
+    catch e =>
+      IO.eprintln s!"Warning: Failed to connect to MCP server '{serverCfg.name}': {e}"
+  let mcpTools ← mcpRegistry.allTools
+  for (qualName, tool) in mcpTools do
+    match MCP.parseQualifiedName qualName with
+    | some (serverName, _) =>
+      mcpToolDefs := mcpToolDefs ++ [mcpToolToLLM serverName tool]
+    | none => pure ()
+  let allTools := agentTools ++ mcpToolDefs
+  if cfg.verbose && !mcpToolDefs.isEmpty then
+    IO.println s!"MCP tools available: {mcpToolDefs.map (·.name)}"
+    IO.println ""
   let systemPrompt := reactSystemPrompt cfg.task
   -- Track conversation history for tool calling
   let mut history : List (PendingToolCall × String) := []
@@ -474,7 +516,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
       IO.println s!"[Step {stepCount}]"
     -- Build messages and call LLM (proven valid by traceToMessages_valid)
     let messages := traceToMessages systemPrompt cfg.task history
-    let request : LLM.Request := ⟨messages, agentTools⟩
+    let request : LLM.Request := ⟨messages, allTools⟩
     if cfg.verbose then
       IO.println s!"  Calling LLM with {request.messages.length} messages..."
     let response ← LLM.call llmCfg request
@@ -500,7 +542,10 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
               done := true
           | .toolCall name args =>
               IO.println s!"Tool: {name}"
-              let observation ← Tools.execute cfg.workDir name args
+              let observation ← if MCP.isMcpTool name then
+                  mcpRegistry.execute name args
+                else
+                  Tools.execute cfg.workDir name args
               IO.println s!"Observation: {observation.take 500}"
               -- Add to history (consistency proof comes from ParsedToolCall)
               let pending : PendingToolCall :=
@@ -512,6 +557,8 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
         else
           errorMsg := some "Empty tool calls array"
           done := true
+  -- Disconnect MCP servers
+  mcpRegistry.disconnectAll
   -- Report results
   IO.println s!"\nAgent completed."
   IO.println s!"  Steps taken: {stepCount}"
