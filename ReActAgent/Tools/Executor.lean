@@ -12,6 +12,18 @@ open Lean (Json)
 
 /-! ## File Editor Helpers -/
 
+/-- Maximum number of lines before output is clipped. -/
+private def maxOutputLines : Nat := 500
+
+/-- Clip long output and append a marker if truncated. -/
+private def clipOutput (output : String) : String :=
+  let lines := output.splitOn "\n"
+  if lines.length > maxOutputLines then
+    let clipped := lines.take maxOutputLines
+    "\n".intercalate clipped ++ "\n<response clipped>"
+  else
+    output
+
 /-- Format a line number with padding and tab. -/
 private def fmtLine (num : Nat) (line : String) : String :=
   let pad := if num < 10 then "     " else if num < 100 then "    " else if num < 1000 then "   " else "  "
@@ -52,17 +64,17 @@ private def fileView (path : String) (viewRange : Option (Int × Int)) : IO Stri
       cmd := "find"
       args := #[path, "-maxdepth", "2", "-not", "-name", ".*", "-not", "-path", "*/.*"]
     }
-    return output.stdout
+    return clipOutput output.stdout
   else
     let result ← IO.FS.readFile path |>.toBaseIO
     match result with
     | .error e => return s!"Error reading file: {e}"
     | .ok content =>
       match viewRange with
-      | none => return addLineNumbers content
+      | none => return clipOutput (addLineNumbers content)
       | some (startLine, endLine) =>
         match addLineNumbersRange content startLine endLine with
-        | .ok s => return s
+        | .ok s => return clipOutput s
         | .error e => return s!"Error: {e}"
 
 /-- Create a new file (only if it doesn't already exist). -/
@@ -72,6 +84,14 @@ private def fileCreate (path : String) (fileText : String) : IO String := do
   if exists_ then
     return s!"Error: File already exists at: {path}. Cannot overwrite files using command `create`."
   else
+    -- Check that the parent directory exists
+    match pathObj.parent with
+    | some parentDir =>
+      let parentExists ← parentDir.pathExists
+      if !parentExists then
+        return s!"Error: Directory {parentDir} does not exist. Please create it first or verify the path."
+      pure ()
+    | none => pure ()
     let result ← (IO.FS.writeFile path fileText) |>.toBaseIO
     match result with
     | .ok _ => return s!"File created successfully at: {path}"

@@ -288,16 +288,60 @@ def agentTools : List LLM.ToolFunction := [
     ]
     required := ["path", "content"] },
   { name := "file_editor"
-    description := "Custom editing tool for viewing, creating and editing files. Commands: view (show file with line numbers or list directory), create (create new file), str_replace (find and replace exact string), insert (insert text after a line), undo_edit (revert last edit). Use absolute paths."
+    description := "Custom editing tool for viewing, creating \
+      and editing files in plain-text format.\n\
+      * State is persistent across command calls.\n\
+      * If `path` is a text file, `view` displays with \
+      `cat -n`. If `path` is a directory, `view` lists \
+      non-hidden files up to 2 levels deep.\n\
+      * `create` cannot be used if `path` already exists.\n\
+      * Long output is truncated with `<response clipped>`.\n\
+      * `undo_edit` reverts the last edit at `path`.\n\n\
+      Before using this tool:\n\
+      1. Use view to understand the file's contents.\n\
+      2. Verify the parent directory exists (for create).\n\n\
+      When making edits:\n\
+      - Ensure idiomatic, correct code.\n\
+      - Do not leave code in a broken state.\n\
+      - Always use absolute file paths (starting with /).\n\n\
+      CRITICAL REQUIREMENTS:\n\
+      1. EXACT MATCHING: `old_str` must match EXACTLY one or \
+      more consecutive lines, including all whitespace.\n\
+      2. UNIQUENESS: `old_str` must uniquely identify a single \
+      instance. Include 3-5 lines of context.\n\
+      3. REPLACEMENT: `new_str` replaces `old_str`. Both must \
+      be different."
     parameters := [
-      { name := "command", type := "string", description := "The command to run: view, create, str_replace, insert, undo_edit"
-        enumValues := some ["view", "create", "str_replace", "insert", "undo_edit"] },
-      { name := "path", type := "string", description := "Absolute path to file or directory" },
-      { name := "file_text", type := "string", description := "Required for create: content of the file to create" },
-      { name := "old_str", type := "string", description := "Required for str_replace: the exact string to replace" },
-      { name := "new_str", type := "string", description := "For str_replace: replacement string. For insert: string to insert" },
-      { name := "insert_line", type := "string", description := "Required for insert: line number after which to insert (0 for beginning)" },
-      { name := "view_range", type := "string", description := "For view: line range as 'start,end' e.g. '11,20'. Use -1 for end of file" }
+      { name := "command"
+        type := "string"
+        description := "The command to run: view, create, \
+          str_replace, insert, undo_edit"
+        enumValues := some
+          ["view", "create", "str_replace",
+           "insert", "undo_edit"] },
+      { name := "path"
+        type := "string"
+        description := "Absolute path to file or directory" },
+      { name := "file_text"
+        type := "string"
+        description := "Required for create: content of \
+          the file to create" },
+      { name := "old_str"
+        type := "string"
+        description := "Required for str_replace: the \
+          exact string to replace" },
+      { name := "new_str"
+        type := "string"
+        description := "For str_replace: replacement \
+          string. For insert: string to insert" },
+      { name := "insert_line"
+        type := "string"
+        description := "Required for insert: line number \
+          after which to insert (0 for beginning)" },
+      { name := "view_range"
+        type := "string"
+        description := "For view: line range as \
+          'start,end' e.g. '11,20'. Use -1 for end" }
     ]
     required := ["command", "path"] },
   { name := "submit"
