@@ -13,10 +13,10 @@ open Lean (Json)
 /-! ## File Editor Helpers -/
 
 /-- Maximum number of lines before output is clipped. -/
-private def maxOutputLines : Nat := 500
+def maxOutputLines : Nat := 500
 
 /-- Clip long output and append a marker if truncated. -/
-private def clipOutput (output : String) : String :=
+def clipOutput (output : String) : String :=
   let lines := output.splitOn "\n"
   if lines.length > maxOutputLines then
     let clipped := lines.take maxOutputLines
@@ -25,12 +25,12 @@ private def clipOutput (output : String) : String :=
     output
 
 /-- Format a line number with padding and tab. -/
-private def fmtLine (num : Nat) (line : String) : String :=
+def fmtLine (num : Nat) (line : String) : String :=
   let pad := if num < 10 then "     " else if num < 100 then "    " else if num < 1000 then "   " else "  "
   s!"{pad}{num}\t{line}"
 
 /-- Number lines starting from a given offset. -/
-private def numberLines (lines : List String) (startNum : Nat := 1) : List String :=
+def numberLines (lines : List String) (startNum : Nat := 1) : List String :=
   lines.zipIdx startNum |>.map fun (line, num) => fmtLine num line
 
 /-- Add line numbers to content (like `cat -n`). -/
@@ -260,5 +260,145 @@ def execute (workDir : String) (name : String) (args : String) : IO String := do
       | _ => return "Error: write_file requires <path> <content>"
   | "file_editor" => executeFileEditor args
   | _ => return s!"Unknown tool: {name}"
+
+/-! ## Pure Cores of Mutation Operations -/
+
+/-- Pure core of str_replace: validate and perform string replacement. -/
+def strReplace (content oldStr newStr : String) : Except String String :=
+  if oldStr == newStr then
+    .error "new_str and old_str must be different"
+  else
+    let parts := content.splitOn oldStr
+    match parts with
+    | [_] => .error "no match found"
+    | [before, after] => .ok (before ++ newStr ++ after)
+    | _ => .error "multiple matches"
+
+/-- Pure core of insert: splice new text after a given line. -/
+def insertAtLine (content : String) (insertLine : Nat) (newStr : String) : Except String String :=
+  let lines := content.splitOn "\n"
+  if insertLine > lines.length then
+    .error s!"insert_line {insertLine} is beyond the file length ({lines.length} lines)"
+  else
+    let before := lines.take insertLine
+    let after := lines.drop insertLine
+    let newLines := before ++ newStr.splitOn "\n" ++ after
+    .ok ("\n".intercalate newLines)
+
+/-! ## Properties -/
+
+/-- numberLines preserves the number of lines. -/
+theorem numberLines_length (lines : List String) (startNum : Nat) :
+    (numberLines lines startNum).length = lines.length := by
+  simp [numberLines, List.length_map, List.length_zipIdx]
+
+/-- clipOutput is identity when input has ≤ maxOutputLines lines. -/
+theorem clipOutput_short (s : String) (h : (s.splitOn "\n").length ≤ maxOutputLines) :
+    clipOutput s = s := by
+  simp only [clipOutput, maxOutputLines] at h ⊢
+  have : ¬ (s.splitOn "\n").length > 500 := by omega
+  simp [this]
+
+/-- In the non-clipped path, clipOutput returns the input unchanged. -/
+theorem clipOutput_eq_or_clipped (s : String) :
+    clipOutput s = s ∨
+    clipOutput s = "\n".intercalate ((s.splitOn "\n").take maxOutputLines) ++
+      "\n<response clipped>" := by
+  simp only [clipOutput]
+  split
+  · right; rfl
+  · left; rfl
+
+/-- strReplace errors when old and new strings are equal. -/
+theorem strReplace_eq_err (content s : String) :
+    (strReplace content s s).isOk = false := by
+  simp [strReplace, beq_self_eq_true, Except.isOk, Except.toBool]
+
+/-- Successful strReplace decomposes the original content. -/
+theorem strReplace_result (content oldStr newStr result : String)
+    (h : strReplace content oldStr newStr = .ok result) :
+    ∃ before after, content.splitOn oldStr = [before, after] ∧
+    result = before ++ newStr ++ after := by
+  simp only [strReplace] at h
+  split at h
+  · exact absurd h (by simp)
+  · next hne =>
+    match hparts : content.splitOn oldStr, h with
+    | [before, after], h =>
+      simp at h
+      exact ⟨before, after, rfl, h.symm⟩
+
+/-- strReplace succeeds iff oldStr ≠ newStr and oldStr occurs exactly once. -/
+theorem strReplace_ok_iff (content oldStr newStr : String) :
+    (strReplace content oldStr newStr).isOk = true ↔
+    (oldStr == newStr) = false ∧ (content.splitOn oldStr).length = 2 := by
+  constructor
+  · -- Forward: isOk → conditions
+    intro h
+    unfold strReplace at h
+    split at h
+    · simp [Except.isOk, Except.toBool] at h
+    · next hne =>
+      constructor
+      · simpa using hne
+      · revert h
+        match content.splitOn oldStr with
+        | [_] => simp [Except.isOk, Except.toBool]
+        | [_, _] => simp
+        | _ :: _ :: _ :: _ => simp [Except.isOk, Except.toBool]
+        | [] => simp [Except.isOk, Except.toBool]
+  · -- Backward: conditions → isOk
+    intro ⟨hne, hlen⟩
+    unfold strReplace
+    simp only [hne, ite_false]
+    match hparts : content.splitOn oldStr, hlen with
+    | [_, _], _ => simp [Except.isOk, Except.toBool]
+
+/-- insertAtLine produces: original prefix ++ new content ++ original suffix. -/
+theorem insertAtLine_result (content : String) (n : Nat) (newStr : String)
+    (h : n ≤ (content.splitOn "\n").length) :
+    insertAtLine content n newStr = .ok ("\n".intercalate
+      ((content.splitOn "\n").take n ++
+       newStr.splitOn "\n" ++
+       (content.splitOn "\n").drop n)) := by
+  simp only [insertAtLine]
+  have : ¬ n > (content.splitOn "\n").length := by omega
+  simp [this]
+
+/-- insertAtLine result line count = original + inserted. -/
+theorem insertAtLine_line_count (content : String) (n : Nat) (newStr : String)
+    (h : n ≤ (content.splitOn "\n").length) :
+    ((content.splitOn "\n").take n ++
+     newStr.splitOn "\n" ++
+     (content.splitOn "\n").drop n).length =
+    (content.splitOn "\n").length + (newStr.splitOn "\n").length := by
+  simp [List.length_append, List.length_take, List.length_drop]
+  omega
+
+/-- insertAtLine preserves the prefix (list-level). -/
+theorem insertAtLine_take (content : String) (n : Nat) (newStr : String)
+    (h : n ≤ (content.splitOn "\n").length) :
+    ((content.splitOn "\n").take n ++
+     newStr.splitOn "\n" ++
+     (content.splitOn "\n").drop n).take n =
+    (content.splitOn "\n").take n := by
+  rw [List.append_assoc]
+  rw [List.take_append_of_le_length (by simp [List.length_take]; omega)]
+  simp [List.take_take, Nat.min_self]
+
+/-- insertAtLine preserves the suffix (list-level). -/
+theorem insertAtLine_drop (content : String) (n : Nat) (newStr : String)
+    (h : n ≤ (content.splitOn "\n").length) :
+    ((content.splitOn "\n").take n ++
+     newStr.splitOn "\n" ++
+     (content.splitOn "\n").drop n).drop
+      (n + (newStr.splitOn "\n").length) =
+    (content.splitOn "\n").drop n := by
+  rw [List.append_assoc, ← List.append_assoc ((content.splitOn "\n").take n)]
+  have hlen : ((content.splitOn "\n").take n ++ newStr.splitOn "\n").length =
+    n + (newStr.splitOn "\n").length := by simp [List.length_append, List.length_take]; omega
+  rw [show n + (newStr.splitOn "\n").length =
+    ((content.splitOn "\n").take n ++ newStr.splitOn "\n").length from hlen.symm]
+  exact List.drop_left
 
 end Tools
