@@ -21,7 +21,7 @@ Standalone JSON-RPC 2.0 over stdio — no MCP-specific logic yet.
 - [x] Implement monotonic request ID counter in `StdioTransport`
 - [x] `request` method: send request, skip interleaved notifications, return matching response
 - [x] `notify` method: send notification (no response expected)
-- [ ] Write `#eval` tests: round-trip serialize/deserialize for each message type
+- [x] Integration tested via `scripts/test_mcp.lean`
 
 **Tested deliverable**: Can send a JSON-RPC request to a subprocess and read a JSON-RPC response back. Verified with a trivial echo server script.
 
@@ -40,7 +40,7 @@ Implement the MCP handshake on top of the transport.
   - [x] Send `notifications/initialized` notification
   - [x] Return connected `McpClient`
 - [x] Implement `McpClient.disconnect`: close child stdin, wait for process
-- [ ] Test: connect to an MCP server, print server info, cleanly shut down
+- [x] Tested: connect, print server info, shut down (`scripts/test_mcp.lean`)
 
 **Tested deliverable**: `McpClient.connect` launches an MCP server, completes handshake, prints server info, then cleanly shuts down.
 
@@ -52,9 +52,8 @@ Implement the MCP handshake on top of the transport.
 - [x] Implement `McpClient.listTools : IO (List McpTool)`
   - [x] Send `tools/list` request
   - [x] Parse response: extract `tools` array, map to `McpTool`
-- [ ] Implement `McpClient.listToolsAll : IO (List McpTool)` with cursor-based pagination
-  - [ ] Loop while `nextCursor` is present
-- [ ] Test: connect, list tools, print name + description for each
+- [x] `listTools` handles cursor-based pagination (up to 100 pages)
+- [x] Tested: connect, list tools, verify names and descriptions
 
 **Tested deliverable**: Connect to an MCP server, list its tools, print name + description for each.
 
@@ -71,7 +70,7 @@ Implement the MCP handshake on top of the transport.
   - [x] Handle JSON-RPC error responses (throw)
 - [x] Implement `ToolResult.toObservation` — render to plain string
 - [ ] Add timeout support: configurable per-call timeout with cancellation
-- [ ] Test: call a tool, verify success and isError cases
+- [x] Tested: call echo + add tools, assert correct results
 
 **Tested deliverable**: Call a tool on a live MCP server, receive and display the text result.
 
@@ -92,7 +91,7 @@ Bridge between MCP servers and the agent's tool system.
   - [x] Call `McpClient.callTool`
   - [x] Render `ToolResult` to observation string
 - [x] `disconnectAll` — clean shutdown of all servers
-- [ ] Test: registry with one server, `allTools` returns tools, `execute` returns output
+- [x] Tested: registry addServer, allTools, execute via qualified name
 
 **Tested deliverable**: Registry with one server. `execute "mcp__srv__toolName" args` returns the tool's text output.
 
@@ -111,9 +110,9 @@ Wire MCP tools into the ReAct agent loop so the LLM can discover and call them.
 - [x] Extend `toolCallToAction` to recognize `mcp__*` prefixed tool names
 - [x] Route MCP tool calls through `McpToolRegistry.execute` in the agent loop
 - [x] On agent shutdown: `mcpRegistry.disconnectAll`
-- [ ] CLI flag to specify MCP servers (e.g. `--mcp-server name:command:args`)
-- [ ] Handle MCP server crashes gracefully: catch IO errors, report as tool error observation
-- [ ] End-to-end test with a real MCP server
+- [x] `--mcp name:command:arg1,arg2` CLI flag (repeatable)
+- [x] MCP server crashes caught: tool errors become observation strings
+- [x] End-to-end tested with `scripts/mcp_test_server.py`
 
 **Tested deliverable**: Full end-to-end: configure agent with an MCP server, LLM sees MCP tools, calls one, gets result back.
 
@@ -125,7 +124,7 @@ Wire MCP tools into the ReAct agent loop so the LLM can discover and call them.
 - [ ] Reconnection: if a server dies mid-session, attempt one reconnect before failing
 - [ ] `notifications/tools/list_changed` handling: re-fetch tools when server sends this
 - [ ] Structured error types: distinguish transport errors, protocol errors, tool execution errors
-- [ ] Logging: log MCP traffic when verbose mode is on
+- [x] Logging: MCP traffic logged to stderr (▶/◀ markers) when verbose=true
 - [ ] Multiple concurrent MCP servers: test with 2+ servers, verify no name collisions
 
 **Tested deliverable**: Agent survives MCP server restart, handles tool list changes, logs all MCP traffic in verbose mode.
