@@ -129,6 +129,7 @@ def printUsage : IO Unit := do
   IO.println "  --max-cost <N>         Maximum token cost (default: 10000)"
   IO.println "  -i, --interactive      Enable interactive mode (non-headless)"
   IO.println "  -w, --workdir <DIR>    Working directory (default: .)"
+  IO.println "  --mcp <name:cmd:args>   Add MCP server (repeatable, args comma-separated)"
   IO.println "  -v, --verbose          Verbose output"
   IO.println "  -h, --help             Show this help message"
   IO.println ""
@@ -182,6 +183,20 @@ def parseArgs (args : List String) : IO (Option CLIConfig) := do
     | "--workdir" :: dir :: rest => go { cfg with workDir := dir } rest
     | "-v" :: rest => go { cfg with verbose := true } rest
     | "--verbose" :: rest => go { cfg with verbose := true } rest
+    | "--mcp" :: spec :: rest =>
+        -- Format: name:command:arg1,arg2,arg3
+        match spec.splitOn ":" with
+        | name :: cmd :: argsParts =>
+          let cmdArgs := match argsParts with
+            | [] => #[]
+            | parts => ((",".intercalate parts).splitOn ",").toArray
+          let serverCfg : MCP.McpServerConfig := {
+            name := name, command := cmd, args := cmdArgs
+          }
+          go { cfg with mcpServers := cfg.mcpServers ++ [serverCfg] } rest
+        | _ =>
+          IO.println s!"Error: Invalid --mcp format '{spec}'. Use: name:command:arg1,arg2"
+          return none
     | arg :: rest =>
         if arg.startsWith "-" then
           IO.println s!"Error: Unknown option: {arg}"
@@ -488,7 +503,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
   let mut mcpToolDefs : List LLM.ToolFunction := []
   for serverCfg in cfg.mcpServers do
     try
-      mcpRegistry.addServer serverCfg
+      mcpRegistry.addServer serverCfg (verbose := cfg.verbose)
       if cfg.verbose then
         IO.println s!"Connected to MCP server: {serverCfg.name}"
     catch e =>
@@ -542,10 +557,13 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
               done := true
           | .toolCall name args =>
               IO.println s!"Tool: {name}"
-              let observation ← if MCP.isMcpTool name then
+              let observation ← try
+                if MCP.isMcpTool name then
                   mcpRegistry.execute name args
                 else
                   Tools.execute cfg.workDir name args
+              catch e =>
+                pure s!"Error: {e}"
               IO.println s!"Observation: {observation.take 500}"
               -- Add to history (consistency proof comes from ParsedToolCall)
               let pending : PendingToolCall :=

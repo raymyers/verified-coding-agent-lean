@@ -16,10 +16,12 @@ open Lean.JsonRpc (Message)
 structure StdioTransport where
   proc : IO.Process.Child ⟨.piped, .piped, .piped⟩
   nextId : IO.Ref Nat
+  verbose : Bool := false
 
 /-- Spawn a child process and create a transport. -/
 def StdioTransport.create (cmd : String) (args : Array String)
-    (env : Array (String × Option String) := #[]) : IO StdioTransport := do
+    (env : Array (String × Option String) := #[])
+    (verbose : Bool := false) : IO StdioTransport := do
   let proc ← IO.Process.spawn {
     cmd := cmd
     args := args
@@ -29,12 +31,13 @@ def StdioTransport.create (cmd : String) (args : Array String)
     env := env
   }
   let nextId ← IO.mkRef 1
-  return { proc, nextId }
+  return { proc, nextId, verbose }
 
 /-- Send a JSON-RPC message (newline-delimited). -/
 def StdioTransport.send (t : StdioTransport) (msg : Message) : IO Unit := do
   let json := toJson msg
   let line := json.compress ++ "\n"
+  if t.verbose then IO.eprintln s!"  MCP ▶ {json.compress}"
   t.proc.stdin.putStr line
   t.proc.stdin.flush
 
@@ -47,6 +50,7 @@ def StdioTransport.recv (t : StdioTransport) : IO Message := do
   match Json.parse line with
   | .error e => throw <| IO.userError s!"MCP: invalid JSON from server: {e}\nRaw: {line}"
   | .ok j =>
+    if t.verbose then IO.eprintln s!"  MCP ◀ {j.compress}"
     match fromJson? j with
     | .ok (msg : Message) => return msg
     | .error e => throw <| IO.userError s!"MCP: invalid JSON-RPC message: {e}\nRaw: {line}"
@@ -79,9 +83,10 @@ def StdioTransport.notify (t : StdioTransport) (method : String)
     (params : Option Json := none) : IO Unit :=
   t.send (JsonRpc.mkNotification method params)
 
-/-- Close the transport: close stdin, wait for process. -/
-def StdioTransport.close (t : StdioTransport) : IO UInt32 := do
-  let (_, child) ← t.proc.takeStdin
-  child.wait
+/-- Close the transport: close stdin to signal EOF. -/
+def StdioTransport.close (t : StdioTransport) : IO Unit := do
+  -- takeStdin closes the stdin handle, signaling EOF to the child.
+  -- We don't wait — the child may not exit promptly and we don't want to block.
+  let _ ← t.proc.takeStdin
 
 end MCP

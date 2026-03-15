@@ -122,8 +122,9 @@ structure McpClient where
 /-- Connect to an MCP server: spawn process, run initialize handshake. -/
 def McpClient.connect (cmd : String) (args : Array String)
     (clientName : String := "react-agent") (clientVersion : String := "0.1.0")
-    (env : Array (String × Option String) := #[]) : IO McpClient := do
-  let transport ← StdioTransport.create cmd args env
+    (env : Array (String × Option String) := #[])
+    (verbose : Bool := false) : IO McpClient := do
+  let transport ← StdioTransport.create cmd args env verbose
   -- Send initialize request
   let initParams := Json.mkObj [
     ("protocolVersion", "2025-03-26"),

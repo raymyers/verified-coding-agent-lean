@@ -62,9 +62,10 @@ def McpToolRegistry.create : IO McpToolRegistry := do
   return { servers }
 
 /-- Add and connect to an MCP server. -/
-def McpToolRegistry.addServer (reg : McpToolRegistry) (config : McpServerConfig) : IO Unit := do
+def McpToolRegistry.addServer (reg : McpToolRegistry) (config : McpServerConfig)
+    (verbose : Bool := false) : IO Unit := do
   let client ← McpClient.connect config.command config.args
-    (env := config.env)
+    (env := config.env) (verbose := verbose)
   let tools ← client.listTools
   let entry : ServerEntry := { config, client, tools }
   reg.servers.modify (· ++ [entry])
