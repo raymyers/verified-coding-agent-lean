@@ -87,9 +87,30 @@ def McpToolRegistry.allTools (reg : McpToolRegistry) : IO (List (String × McpTo
       result := result ++ [(qualifiedName entry.config.name tool.name, tool)]
   return result
 
-/-- Execute a tool by qualified name. -/
+/-- Reconnect a server entry: disconnect old client, create new connection, refresh tools. -/
+private def reconnectEntry (entry : ServerEntry) (verbose : Bool) : IO ServerEntry := do
+  try entry.client.disconnect catch _ => pure ()
+  let client ← McpClient.connect entry.config.command entry.config.args
+    (env := entry.config.env) (verbose := verbose)
+  let tools ← client.listTools
+  return { entry with client, tools }
+
+/-- Refresh the tool list for a server (handles notifications/tools/list_changed). -/
+def McpToolRegistry.refreshTools (reg : McpToolRegistry) (serverName : String) : IO Unit := do
+  let entries ← reg.servers.get
+  let mut updated := []
+  for entry in entries do
+    if entry.config.name == serverName then
+      let tools ← entry.client.listTools
+      updated := updated ++ [{ entry with tools }]
+    else
+      updated := updated ++ [entry]
+  reg.servers.set updated
+
+/-- Execute a tool by qualified name. Attempts one reconnect on failure. -/
 def McpToolRegistry.execute (reg : McpToolRegistry)
-    (qualName : String) (argsJson : String) : IO String := do
+    (qualName : String) (argsJson : String)
+    (verbose : Bool := false) : IO String := do
   match parseQualifiedName qualName with
   | none => throw <| IO.userError s!"Not an MCP tool name: {qualName}"
   | some (serverName, toolName) =>
@@ -100,8 +121,19 @@ def McpToolRegistry.execute (reg : McpToolRegistry)
       let args ← match Json.parse argsJson with
         | .ok j => pure j
         | .error e => throw <| IO.userError s!"Invalid tool arguments JSON: {e}"
-      let result ← entry.client.callTool toolName args
-      return result.toObservation
+      -- Try call, reconnect once on transport failure
+      try
+        let result ← entry.client.callTool toolName args
+        return result.toObservation
+      catch e =>
+        if verbose then
+          IO.eprintln s!"  MCP: call failed ({e}), attempting reconnect..."
+        let newEntry ← reconnectEntry entry verbose
+        -- Update the registry with the reconnected entry
+        reg.servers.modify (·.map fun ent =>
+          if ent.config.name == serverName then newEntry else ent)
+        let result ← newEntry.client.callTool toolName args
+        return result.toObservation
 
 /-- Disconnect all servers. -/
 def McpToolRegistry.disconnectAll (reg : McpToolRegistry) : IO Unit := do

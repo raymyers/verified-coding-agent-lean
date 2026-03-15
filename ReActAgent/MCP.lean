@@ -8,3 +8,5 @@ import ReActAgent.MCP.JsonRpc
 import ReActAgent.MCP.Transport
 import ReActAgent.MCP.Client
 import ReActAgent.MCP.Registry
+import ReActAgent.MCP.Errors
+import ReActAgent.MCP.Spec

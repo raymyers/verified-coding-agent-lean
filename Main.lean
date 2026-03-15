@@ -559,7 +559,7 @@ def runReactMode (cfg : CLIConfig) : IO UInt32 := do
               IO.println s!"Tool: {name}"
               let observation ← try
                 if MCP.isMcpTool name then
-                  mcpRegistry.execute name args
+                  mcpRegistry.execute name args (verbose := cfg.verbose)
                 else
                   Tools.execute cfg.workDir name args
               catch e =>
